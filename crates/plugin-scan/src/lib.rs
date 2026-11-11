@@ -8,6 +8,8 @@
 //! window stayed black at launch while a plugin took seconds to initialise), and a plugin that
 //! crashes while it loads takes only the child down.
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
