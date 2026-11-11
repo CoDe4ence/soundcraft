@@ -604,6 +604,37 @@ fn side_creates_each_missing_instance_once() {
 }
 
 #[test]
+fn slots_that_got_no_plugin_are_tried_again_after_a_plugin_scan() {
+    // A session opened while the first plugin scan ran gets nothing for the plugins the scan had
+    // not reached; once the scan makes more plugins known, those slots are created again.
+    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
+    let mut side = Side::new(48_000.0, channel().1);
+    let mut s = soundcraft_model::Session::default();
+    let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+    s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::new("clap:does.not.exist"));
+    s.track_mut(t).unwrap().mixer.inserts[1] = Some(Insert::new("clap:stands.for.a.live.one"));
+    side.prepare(&s);
+    // Looking for the plugin scanned CLAP (in the foreground: no background scan runs here), and
+    // that scan's end tells the next prepare to try once more; after that it settles.
+    side.prepare(&s);
+    assert_eq!(side.shadow.get(&(t, 0)), Some(&("clap:does.not.exist".to_string(), 1, false)));
+    // Stand-ins: a live instance in slot 1, and per-slot bookkeeping a retry clears in slot 0.
+    side.shadow.insert((t, 1), ("clap:stands.for.a.live.one".to_string(), 1, true));
+    side.refused.insert((t, 0));
+    side.refused.insert((t, 1));
+
+    side.prepare(&s);
+    assert!(side.refused.contains(&(t, 0)), "no scan since: the missing slot is not retried");
+
+    side.scan_gen = side.scan_gen.wrapping_add(1);
+    side.prepare(&s);
+    assert_eq!(side.scan_gen, soundcraft_mix::hosted_scan_generation());
+    assert!(!side.refused.contains(&(t, 0)), "after a scan the missing slot is created again");
+    assert!(side.refused.contains(&(t, 1)), "a live instance is left alone");
+    assert_eq!(side.shadow.get(&(t, 1)), Some(&("clap:stands.for.a.live.one".to_string(), 1, true)));
+}
+
+#[test]
 fn replaced_sessions_are_freed_on_the_ui_thread() {
     let shared = Arc::new(Shared {
         position: AtomicI64::new(0),

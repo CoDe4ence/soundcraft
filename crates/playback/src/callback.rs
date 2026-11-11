@@ -372,6 +372,9 @@ pub(crate) struct Side {
     old_sessions: Option<Receiver<Arc<Session>>>,
     /// The tracks of the session last sent, to tell the audio thread which ones went.
     tracks: HashSet<TrackId>,
+    /// [`soundcraft_mix::hosted_scan_generation`] when the slots were last created: once a plugin
+    /// scan makes more plugins known, the slots that got nothing are tried again.
+    pub(crate) scan_gen: u64,
 }
 
 impl Side {
@@ -385,6 +388,7 @@ impl Side {
             garbage,
             old_sessions: None,
             tracks: HashSet::new(),
+            scan_gen: soundcraft_mix::hosted_scan_generation(),
         }
     }
 
@@ -485,6 +489,14 @@ impl Side {
                 self.forget(k);
             }
             self.rate = sr;
+        }
+        let scan_gen = soundcraft_mix::hosted_scan_generation();
+        if scan_gen != self.scan_gen {
+            self.scan_gen = scan_gen;
+            let missing: Vec<(TrackId, usize)> = self.shadow.iter().filter(|(_, (_, _, made))| !made).map(|(k, _)| *k).collect();
+            for k in missing {
+                self.forget(k);
+            }
         }
         let specs = soundcraft_mix::instance_specs(s);
         let stale: Vec<(TrackId, usize)> = self.shadow.keys().filter(|k| !specs.iter().any(|x| (x.track, x.slot) == **k)).copied().collect();

@@ -9,7 +9,7 @@ use soundcraft_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
 use soundcraft_plugin_scan as scan_cache;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 /// Most labels read for an enum parameter.
@@ -53,6 +53,10 @@ fn scan_lock() -> MutexGuard<'static, ()> {
 
 /// Set while [`scan_in_background`]'s thread runs.
 static BACKGROUND: AtomicBool = AtomicBool::new(false);
+
+/// Goes up each time a scan makes plugins known: the cache file read at its start, and its end.
+/// Whoever skipped a plugin that was not [`ready`] tries again when it changes.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Set by [`skip_scan`]: the running scan loads no more files.
 static SKIP: AtomicBool = AtomicBool::new(false);
@@ -127,6 +131,7 @@ fn scan_now(reuse: bool) -> Vec<ClapDescriptor> {
     };
     if !known.is_empty() {
         lock().remembered = merge(known.clone());
+        GENERATION.fetch_add(1, Ordering::AcqRel);
     }
     SKIP.store(false, Ordering::Release);
     let ahead = |i: usize, n: usize, p: &Path| {
@@ -143,6 +148,8 @@ fn scan_now(reuse: bool) -> Vec<ClapDescriptor> {
     let mut r = lock();
     r.scanned = Some(list.clone());
     r.problems = problems;
+    drop(r);
+    GENERATION.fetch_add(1, Ordering::AcqRel);
     list
 }
 
@@ -242,6 +249,18 @@ pub fn problems() -> Vec<(PathBuf, String)> {
 
 pub fn scanning() -> bool {
     BACKGROUND.load(Ordering::Acquire)
+}
+
+pub fn ready(id: &str) -> bool {
+    if !scanning() {
+        return true;
+    }
+    let r = lock();
+    r.scanned.iter().flatten().chain(&r.remembered).any(|d| d.id == id)
+}
+
+pub fn scan_generation() -> u64 {
+    GENERATION.load(Ordering::Acquire)
 }
 
 pub fn add_search_dir(dir: &Path) -> usize {
@@ -365,6 +384,11 @@ pub fn plugin_info(id: &str) -> Option<&'static PluginInfo> {
         if r.failed.contains(id) {
             return None;
         }
+    }
+    // Called from the UI every frame: a plugin the running scan has not reached yet has no info
+    // yet, rather than freezing the window until the scan ends.
+    if !ready(id) {
+        return None;
     }
     // Instantiate once to learn the parameters (CLAP exposes them only on an instance).
     instantiate_raw(id).ok().map(|(_, info)| info)

@@ -389,6 +389,13 @@ impl Player {
         }
     }
 
+    /// Whether a CLAP or VST3 scan has made plugins known since [`update_session`](Self::update_session)
+    /// last created the session's plugins: sending the session again then creates the ones a
+    /// running scan had not reached (a session opened on a first launch, before the scan ended).
+    pub fn plugin_scan_advanced(&self) -> bool {
+        self.side().scan_gen != soundcraft_mix::hosted_scan_generation()
+    }
+
     /// Reads the state of every live third-party plugin, for saving the session.
     pub fn capture_states(&self) -> PluginStates {
         self.side().capture_states()

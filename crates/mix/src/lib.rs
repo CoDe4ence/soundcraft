@@ -72,7 +72,10 @@ mod strip;
 mod threads;
 
 use automation::{copy_with_gain, pan_at, pan_segment, send_level, transport_at, volume_level};
-pub use instances::{INSTRUMENT_SLOT, InstanceSpec, NewInstance, PluginFailures, PreparedInstance, create_instance, instance_specs, is_third_party};
+pub use instances::{
+    INSTRUMENT_SLOT, InstanceSpec, NewInstance, PluginFailures, PreparedInstance, create_instance, hosted_ready, hosted_scan_generation,
+    instance_specs, is_third_party,
+};
 pub use meter::StripMeter;
 use midi::sync_sample;
 pub use offline::{

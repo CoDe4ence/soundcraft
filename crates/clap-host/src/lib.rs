@@ -111,6 +111,12 @@ mod api {
     pub fn scanning() -> bool {
         registry::scanning()
     }
+    pub fn ready(id: &str) -> bool {
+        registry::ready(id)
+    }
+    pub fn scan_generation() -> u64 {
+        registry::scan_generation()
+    }
     pub fn search_dirs() -> (Vec<PathBuf>, Vec<PathBuf>) {
         registry::search_dirs()
     }
@@ -167,6 +173,12 @@ mod api {
     pub fn rescan_in_background(_clear_cache: bool) {}
     pub fn scanning() -> bool {
         false
+    }
+    pub fn ready(_id: &str) -> bool {
+        true
+    }
+    pub fn scan_generation() -> u64 {
+        0
     }
     pub fn search_dirs() -> (Vec<PathBuf>, Vec<PathBuf>) {
         (Vec::new(), Vec::new())
@@ -238,6 +250,19 @@ pub fn rescan_in_background(clear_cache: bool) {
 /// Whether a scan thread started by [`scan_in_background`] or [`rescan_in_background`] runs.
 pub fn scanning() -> bool {
     api::scanning()
+}
+
+/// Whether `id` can be created without waiting: no background scan runs, or the plugin is
+/// already known (from the cache file or an earlier scan). A plugin that is not ready would
+/// wait for the whole scan, so a realtime host should skip it and try again when
+/// [`scan_generation`] changes.
+pub fn ready(id: &str) -> bool {
+    api::ready(id)
+}
+
+/// Goes up each time a scan makes plugins known (the cache file read at its start, and its end).
+pub fn scan_generation() -> u64 {
+    api::scan_generation()
 }
 
 /// The folders scans look in: the standard ones for this system (with `CLAP_PATH`), then the

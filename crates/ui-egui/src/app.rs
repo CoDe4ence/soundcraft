@@ -196,7 +196,10 @@ impl SoundApp {
         self.watch_input();
         // Stop the old playback before sending a replacement session to the audio thread.
         self.handle_transport(dt);
-        if self.engine.revision != self.last_rev {
+        // Also when a plugin scan has made more plugins known: a session opened while the first
+        // scan ran gets the plugins it had to skip.
+        let scan_advanced = self.player.as_ref().is_some_and(|p| p.plugin_scan_advanced());
+        if self.engine.revision != self.last_rev || scan_advanced {
             self.last_rev = self.engine.revision;
             if let Some(p) = &self.player {
                 p.update_session(self.engine.session_arc());

@@ -58,6 +58,24 @@ pub fn instance_specs(s: &Session) -> Vec<InstanceSpec> {
     out
 }
 
+/// Whether a hosted plugin can be created without waiting for a background plugin scan (always
+/// for built-in plugins and Audio Units, which are not scanned in the background).
+pub fn hosted_ready(id: &str) -> bool {
+    if id.starts_with(soundcraft_vst3_host::ID_PREFIX) {
+        soundcraft_vst3_host::ready(id)
+    } else if id.starts_with(soundcraft_clap_host::ID_PREFIX) {
+        soundcraft_clap_host::ready(id)
+    } else {
+        true
+    }
+}
+
+/// Changes whenever a CLAP or VST3 scan makes plugins known: a slot whose plugin was not
+/// [`hosted_ready`] is worth trying again.
+pub fn hosted_scan_generation() -> u64 {
+    soundcraft_vst3_host::scan_generation().wrapping_add(soundcraft_clap_host::scan_generation())
+}
+
 /// A plugin made by [`create_instance`].
 pub struct NewInstance {
     pub plugin: Box<dyn Plugin>,
@@ -81,6 +99,14 @@ pub(crate) fn create_instance_for(
     ch: usize,
     offline: bool,
 ) -> Option<NewInstance> {
+    // In realtime use this runs on the UI thread: a plugin that a background scan has not reached
+    // yet would hold it until the whole scan ends (minutes on a first launch with many plugins).
+    // Skip it; the caller tries again when `hosted_scan_generation` changes. An offline render
+    // waits instead, so a bounce never leaves a plugin out.
+    if !offline && !hosted_ready(id) {
+        log::info!("{id}: waiting for the plugin scan");
+        return None;
+    }
     let mut plugin = create_plugin(id)?;
     if offline {
         plugin.set_offline(true);
