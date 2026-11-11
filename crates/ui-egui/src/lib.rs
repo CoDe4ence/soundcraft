@@ -27,6 +27,7 @@ pub mod menus;
 pub mod mix_window;
 pub mod palette;
 pub mod panels;
+pub mod plugin_folders;
 pub mod preferences;
 pub mod shortcuts;
 pub mod theme;
@@ -122,6 +123,9 @@ pub struct UiState {
     pub preferences_window_pos: Option<[f32; 2]>,
     pub reduce_visual_effects: preferences::ReduceVisualEffects,
     pub undo_levels: usize,
+    pub show_plugin_folders: bool,
+    /// The user's own VST3 and CLAP folders (Setup › Plug-in Folders), kept with the preferences.
+    pub plugin_dirs: plugin_folders::PluginDirs,
     /// The audio device choice (Setup › Playback Engine), kept with the preferences: per machine.
     pub audio: soundcraft_playback::AudioConfig,
     /// The Mix window lives in its own native window (Window › Mix in Separate Window); the main
@@ -195,6 +199,8 @@ impl Default for UiState {
             preferences_window_pos: None,
             reduce_visual_effects: preferences::ReduceVisualEffects::default(),
             undo_levels: 64,
+            show_plugin_folders: false,
+            plugin_dirs: plugin_folders::PluginDirs::default(),
             audio: soundcraft_playback::AudioConfig::default(),
             mix_separate: false,
             show_io_setup: false,
