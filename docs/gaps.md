@@ -1,6 +1,6 @@
 # Where SoundCraft falls short of Pro Tools
 
-> **Last reviewed:** 2026-10-25 · **Last updated:** 2026-11-12 · **Change:** minor (G-23: memory locations depth; previously trivial: G-04: volume automation read at every sample, #1354; previously trivial: G-01: `setup.playback_engine` applies the device buffer in the desktop app; G-04: Clip Looping crossfade and loop count) · **Target:** Avid Pro Tools Ultimate 2026.4.1
+> **Last reviewed:** 2026-10-25 · **Last updated:** 2026-11-12 · **Change:** minor (G-23 shrunk: memory location gaps closed; previously minor: G-23: memory locations depth; previously trivial: G-04: volume automation read at every sample, #1354; previously trivial: G-01: `setup.playback_engine` applies the device buffer in the desktop app; G-04: Clip Looping crossfade and loop count) · **Target:** Avid Pro Tools Ultimate 2026.4.1
 
 Every known shortfall, one entry each, ranked by how much it stops a Pro Tools user from doing
 real work in SoundCraft. This is the work list: pick from the top. Rows marked **alpha blocker**
@@ -37,7 +37,7 @@ When you close a gap, delete its entry (or shrink it) in the same PR, and bump t
 | G-20 | MIDI/instrument depth: MIDI learn, notation editing | Features | [target-app-parity.md](target-app-parity.md) | 40–60 |
 | G-21 | Compressed export (MP3, AAC/M4A, Ogg/Opus) | File formats | [file-format-parity.md](file-format-parity.md) | 10–20 |
 | G-22 | Avid cloud services (collaboration, Sketch, Splice, sign-in) | Ecosystem | — | not estimated (owner decision) |
-| G-23 | Memory locations: no stored view settings, a list-only window, Markers Follow Edit and track-lane markers do nothing | Features | [memory-locations.md](memory-locations.md) | 20–35 |
+| G-23 | Memory locations: column choice and sorting in the window, typed positions, keyboard recall in Commands Focus with a selection (the main gaps closed 2026-11-12) | Features | [memory-locations.md](memory-locations.md) | 3–6 |
 
 ## Details
 
@@ -231,17 +231,20 @@ missing. Out of scope unless the owner decides otherwise.
 
 ### G-23. Memory locations depth
 
-Markers and stored selections work for navigation (add, recall, step, rename, delete, five ruler
-lanes, Merge Markers, Insert/Cut Time, MIDI export). They store no view settings (zoom, pre/post-roll,
-shown tracks, heights, group enables, window configuration). The window is a list without comments,
-colour, lane or kind controls. Markers Follow Edit, track-lane markers and four Marker Displays
-options are saved but do nothing. Markers can't be dragged, have no keypad recall, and are dropped by
-MIDI and Session Data import. Detail: [memory-locations.md](memory-locations.md). ≈ 20–35 h.
+Closed on 2026-11-12: memory locations store and recall view settings (zoom, pre/post-roll, track
+visibility and heights, group enables, window configuration); the window is an editor with a
+New/Edit dialog, colours, comments, lanes, find and delete all; Markers Follow Edit, track-lane
+markers and the Marker Displays options work; markers drag on rulers and lanes; Period, number,
+Period recalls; MIDI and Session Data imports keep markers. What remains: choosing and sorting the
+window's columns, typing a position in the window, and keyboard recall in Commands Keyboard Focus
+while something is selected (egui can't tell the keypad's Period from the main keyboard's).
+Detail: [memory-locations.md](memory-locations.md). ≈ 3–6 h.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | G-23 shrunk from 20–35 h to 3–6 h: the memory location gaps closed; column choice, typed positions and keypad recall in Commands Focus remain |
 | 2026-11-12 | minor | Added G-23 (memory locations depth) from a code read; see memory-locations.md |
 | 2026-11-04 | trivial | G-04: track and master volume automation read at every sample, so breakpoints act on their own sample in any block size (#1354); estimates unchanged |
 | 2026-10-25 | trivial | G-04: Clip Looping (#1030) lacks the loop crossfade option, and Number of Loops stops at 512 while length and fill make up to 1000 loops |

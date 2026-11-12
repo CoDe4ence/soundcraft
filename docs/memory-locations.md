@@ -1,17 +1,10 @@
 # Memory locations
 
-> **Last reviewed:** 2026-11-12 · **Last updated:** 2026-11-12 · **Change:** major (created from a code read) · **Target:** Avid Pro Tools Ultimate 2026.4.1
+> **Last reviewed:** 2026-11-12 · **Last updated:** 2026-11-12 · **Change:** major (the eight gaps closed; previously major: created from a code read) · **Target:** Avid Pro Tools Ultimate 2026.4.1
 
-What SoundCraft's memory locations (markers and stored selections) do today, read from the code,
-and what they lack compared with Pro Tools. The work to close the gaps is ranked as
-[G-23 in gaps.md](gaps.md#g-23-memory-locations-depth).
-
-**Summary:** markers and selections work for everyday navigation: you can add, name, recall, step
-through, delete and copy them, put them on five ruler lanes, and they are saved with the session
-and exported to MIDI files. The Memory Locations window is a basic list. A Pro Tools memory location
-also stores view settings (zoom, pre/post-roll, shown tracks, track heights, group enables, window
-configuration), and SoundCraft stores none of them. Several marker options and display settings
-can be switched on but have no effect.
+What SoundCraft's memory locations (markers, stored selections and view-only locations) do, read
+from the code. The eight gaps the first version of this page listed are closed; what remains is
+listed at the end, and in [gaps.md](gaps.md#g-23-memory-locations-depth).
 
 ## What a memory location holds
 
@@ -19,71 +12,81 @@ can be switched on but have no effect.
 
 | Field | Meaning |
 |---|---|
-| `number` | User-visible number, unique; a new one takes the highest number plus one (`Session::add_marker`) |
+| `number` | User-visible number, unique; a new one takes the highest number plus one, and its default name ("Marker n") uses the same number |
 | `name`, `comments` | Free text |
-| `kind` | `Marker` (a point), `Selection` (a stored range) or `None` (documented as "only recalls view settings") |
+| `kind` | `Marker` (a point), `Selection` (a stored range) or `None` (view settings only, no place) |
 | `start`, `end` | Samples; a marker has `end == start` |
-| `color` | Optional RGB; the ruler draws it, otherwise yellow |
+| `color` | Optional RGB; drawn on rulers and lanes, otherwise yellow |
 | `ruler` | Marker ruler lane 1–5 |
-| `track` | Optional track for a track-lane marker; nothing sets it yet |
+| `track` | A track-lane marker's track; `None` for a ruler marker |
+| `view` | The view settings it recalls (`LocationView`): zoom and scroll, pre/post-roll, hidden tracks, track heights, group enables, a window configuration number. Each is optional |
 
-Memory locations are part of the session document, so they are saved, reopened and undone like any
-other edit.
+Memory locations are part of the session document: saved, reopened and undone like any other edit.
 
-## What works
+## Commands
 
-**Commands** (`crates/engine/src/cmd/event.rs`; every one is also available to the CLI, the control
-channel and MCP):
+All in the command registry, so menus, shortcuts, the CLI, the control channel and MCP share them.
 
 | Command | What it does |
 |---|---|
-| `markers.add` (Enter) | New marker at the playhead while playing, else at the selection start. `kind: "selection"` stores the edit selection. Takes `name`, `at` or `start`/`end`, and `ruler` 1–5 |
-| `markers.edit` | Rename, comments, move (`at`, keeps a selection's length), colour (`[r,g,b]` or `null`); select it by `number`, `id` or `name` |
+| `markers.add` (Enter) | New location at the playhead while playing, else at the selection start; `kind: "selection"` stores the edit selection. Takes `name`, `at` or `start`/`end`, `ruler` 1–5 or `track`, `comments`, `color`, and `store: [...]` (the view settings to capture now) with `window_config: n` |
+| `markers.edit` | Rename, comments, move (`at`), colour, `ruler`, `track` (null: back to the ruler), `store` / `forget` view settings, `window_config` |
 | `markers.delete` | Delete one, by `number`, `id` or `name` |
-| `markers.recall` | A marker puts the insertion point there; a selection restores the edit selection; both locate the transport |
-| `markers.next`, `markers.previous` | Step to the next or previous marker start from the selection |
+| `markers.delete_all` | Delete all of them, or one ruler's (`ruler`) or one track's (`track`) |
+| `markers.recall` (Period, number, Period) | A marker or selection goes to its place; the stored view settings are recalled too, only for tracks and groups that still exist, with stored numbers clamped. A `none` location recalls only its view settings. Returns the window configuration for the UI to recall |
+| `markers.next`, `markers.previous` | Step to the next or previous marker |
 
-**Editing and options:**
-- Copy takes the point markers inside the copied range; Edit ▸ Paste Special ▸ Merge Markers pastes them at the insertion point, skipping exact duplicates (`edit.paste_merge_markers`).
-- Event ▸ Time Operations ▸ Insert Time moves later markers; Cut Time removes the ones inside the range and moves later ones back (`crates/engine/src/cmd/event.rs`).
-- Edit ▸ Selection ▸ Move/Extend Edit Selection To Marker Lane Above/Below choose ruler lanes 1–5 and report the markers in the selection (`edit.marker_lane_*`).
-- Grid lines and snapping can include marker boundaries (`grid_clips_markers`).
-- Event ▸ Extract Chords from Selection writes each bar's chord as a marker on Markers 2 (`event.extract_chords`).
+The view settings `store` and `forget` name: `zoom`, `pre_post_roll`, `track_visibility`,
+`track_heights`, `group_enables`, `window_config`. Track visibility stores the hidden tracks, so
+tracks made later stay shown.
 
-**In the Edit window** (`crates/ui-egui/src/edit_window/rulers.rs`):
-- Five marker rulers (View ▸ Rulers ▸ Markers … Markers 5, and All Marker Rulers). Markers draw as flags in their colour; a selection also shades its range.
-- Click a marker to recall it, Alt-click to delete it, double-click it to rename it, and double-click empty ruler space to add a marker on that lane.
-- View ▸ Marker Displays ▸ Ruler Lines draws a line down the tracks at each marker (`crates/ui-egui/src/edit_window/overlay.rs`).
+## Editing
 
-**The Memory Locations window** (Window ▸ Memory Locations, Cmd+5; `crates/ui-egui/src/panels/memory.rs`), a dockable panel:
-- "+ Marker" and "+ Selection" buttons.
-- One row per location: number (click to recall), editable name, location and length in the main counter's format, type, and a delete button.
+- **Markers Follow Edit** (Options): a track's lane markers follow that track's Shuffle edits, stopping at a locked clip as the clips do. Ruler markers follow Shuffle edits made on every track that holds clips: cut, clear, paste, duplicate, repeat, insert silence, duplicate-extend, move to playlist and placing a file. Markers in time that closes up are removed. With the option off, Shuffle edits leave markers alone.
+- **Insert Time and Cut Time** always move markers; Cut Time removes the ones in the cut.
+- **Copy** carries markers and stored selections that start in the range; **Paste Special ▸ Merge Markers** pastes them at the insertion point, skipping exact duplicates.
+- **Move/Extend Edit Selection To Marker Lane Above/Below** choose ruler lanes 1–5.
+- **Grid** lines and snapping can include marker boundaries.
+- **Event ▸ Extract Chords from Selection** writes each bar's chord as a marker on Markers 2.
+- **Deleting a track** removes its lane markers; undo brings them back.
 
-**Files:**
-- Standard MIDI File export writes each marker as a Marker meta event (`crates/engine/src/io/midi.rs`).
-- File ▸ Export ▸ Session Info as Text ends with a markers listing: number, location, name (`crates/engine/src/inspect.rs`).
+## In the Edit window
 
-## What is missing or does nothing
+- **Five marker rulers** (View ▸ Rulers ▸ Markers … Markers 5). Ruler markers draw as flags in their colour; a selection also shades its range. Click recalls, Alt-click deletes, double-click renames (or adds one on empty ruler), and **dragging** moves a marker, snapped in Grid mode, in one undo step.
+- **Track lanes** (View ▸ Marker Displays ▸ Track Lane): a strip along the top of each track shows its lane markers, with the same click, double-click and drag actions. With **Options ▸ Marker Target Follows First Selected Track**, a new marker goes onto the first selected track instead of the ruler.
+- **Ruler Lines** draws a line down the tracks at each ruler marker, and down its own track for a lane marker. **Folder Lines** adds a folder's tracks' lane markers to the folder's lane and lines. **Ruler Lane Color** and **Track Lane Color** shade each lane from one marker to the next in its colour.
 
-Ranked by how much a Pro Tools user would miss it.
+## The Memory Locations window
 
-1. **No stored view settings.** A Pro Tools memory location can also store zoom, pre/post-roll, shown/hidden tracks, track heights, group enables and the window configuration, and recall them. SoundCraft stores none of these. A `None` location is meant to recall only view settings, so recalling one just moves the playhead.
-2. **The window is a list, not an editor.** It has no comments, colour, ruler lane or kind controls, and no dialog for a new location's name and settings. It can't sort, filter or search, it has no "delete all", and it has no per-location view-setting columns. Comments and colour can be set only through `markers.edit`.
-3. **Markers Follow Edit does nothing.** `options.markers_follow_edit` is saved and shown checked, but no edit reads it: shuffle edits, deleting clips and other edits leave markers where they were. Only Insert Time and Cut Time move markers, and they always do.
-4. **No track-lane markers.** `MemoryLocation::track` exists, but no command or UI sets it. View ▸ Marker Displays ▸ Track Lane, Track Lane Color, Folder Lines and Ruler Lane Color are saved toggles that nothing draws. Options ▸ Marker Target Follows First Selected Track is the same.
-5. **Markers can't be dragged** on the ruler. They move only through `markers.edit`.
-6. **No keypad recall.** The `markers.recall` spec lists "Period + n + Period", but no key handler enters that sequence. `crates/ui-egui/src/shortcuts.rs` notes that egui reports keypad digits as main-keyboard digits, so the numeric keypad can't be told apart.
-7. **Imports drop markers.** The MIDI reader parses Marker meta events (`crates/midi/src/smf.rs`), but MIDI import does not add them to the session. File ▸ Import ▸ Session Data imports tracks only, not memory locations.
-8. **Small inconsistencies:**
-   - A new marker's default name, "Marker n", counts the existing markers plus one. Its number is the highest number plus one. After a delete the two differ.
-   - Copy and Merge Markers carry only point markers, not stored selections.
-   - The session text listing leaves out each location's kind, length and comments.
+Window ▸ Memory Locations (Cmd+5), a dockable panel (`crates/ui-egui/src/panels/memory.rs`):
 
-**Rough estimate to close the gaps:** about 20–35 agent-hours. Item 1 and the window editor are most
-of it.
+- **New…** opens a dialog: name, type, ruler or track lane, colour, comments, and which view settings to store (with a window configuration number). **Edit** opens it for an existing location: settings left ticked keep what they stored, new ticks capture now, unticked ones are forgotten. Each OK is one undo step.
+- **+ Marker** and **+ Selection** add one at once. **Find** filters by name or comments. **Delete ▸ Delete All Memory Locations**.
+- Rows: number (click to recall), Edit, delete, colour menu, editable name, location and length in the main counter's format, type, where it lives (ruler n or a track), the stored settings (Z P V H G W, named on hover) and editable comments.
+
+## Keyboard recall
+
+Period, the location's number (up to five digits, shown in the status line), Period. Escape
+cancels; any other key cancels and then does its usual job; an unknown number says so. In
+Commands Keyboard Focus, Period nudges: egui reports the numeric keypad's Period as the main
+keyboard's, so there the entry starts only when nothing is selected to nudge.
+
+## Files
+
+- **MIDI import** turns the file's Marker meta events into markers, placed like the notes (`file.import_midi`, `markers?: true`; at most 10,000; the same file twice adds them once). **MIDI export** writes each marker as a Marker meta event.
+- **Import Session Data** (`file.import_session_data`, `markers?: false`) brings the donor's memory locations with new numbers, skipping ones already here. Lane markers follow their tracks when imported; stored track settings are mapped to the imported tracks and group enables are dropped.
+- **Session Info as Text** lists each location's number, location, type, length, name and comments.
+
+## What remains
+
+- **Keyboard recall in Commands Keyboard Focus with a selection.** The numeric keypad can't be told apart from the main keyboard (an egui limit), so Period nudges there. Recall from the window, the rulers or the lanes instead.
+- **The window is one fixed set of columns.** Pro Tools lets you choose which columns show and sort by them; the panel scrolls sideways when it is narrow.
+- **A location's place can be typed only through `markers.edit` (`at`)**; the window and dialog show it but move it only by dragging.
+- **Fidelity is unmeasured**: these behaviours follow the features' names and observed behaviour, not a side-by-side comparison with Pro Tools.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | major | The eight gaps closed: stored view settings, editor window, Markers Follow Edit, track-lane markers and display options, dragging, keyboard recall, imports, naming/copy/listing. What remains listed |
 | 2026-11-12 | major | Created from a code read: what memory locations hold and do, and eight ranked gaps |
