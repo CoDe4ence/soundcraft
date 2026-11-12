@@ -42,16 +42,18 @@ pub(super) fn overlay(app: &mut SoundApp, ui: &mut Ui, tl: Rect, area: Rect) {
         }
     }
     let sel = s.edit.selection;
-    // Timeline selection markers on the main ruler.
-    if !sel.is_empty() {
-        for x in [x_of(s, tl, sel.start), x_of(s, tl, sel.end)] {
+    // Timeline selection markers on the main ruler (the edit selection's while they are linked).
+    let timeline = if s.edit.link_timeline_edit { sel } else { s.edit.timeline_selection };
+    if !timeline.is_empty() {
+        for x in [x_of(s, tl, timeline.start), x_of(s, tl, timeline.end)] {
             painter.add(Shape::convex_polygon(
                 vec![pos2(x - 5.0, area.min.y + 2.0), pos2(x + 5.0, area.min.y + 2.0), pos2(x, area.min.y + 9.0)],
                 t.accent,
                 Stroke::NONE,
             ));
         }
-    } else if !app.is_playing() {
+    }
+    if sel.is_empty() && !app.is_playing() {
         let x = x_of(s, tl, sel.start);
         let now = ui.input(|i| i.time);
         let (id, key) = (ui.scope_id().with("insertion_blink"), (sel.start, s.edit.selected_tracks.clone()));

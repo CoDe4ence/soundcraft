@@ -1593,6 +1593,44 @@ fn alt_click_on_a_marker_deletes_it() {
 }
 
 #[test]
+fn dragging_a_timebase_ruler_selects_and_playback_plays_the_timeline_selection() {
+    let mut engine = soundcraft_engine::demo::demo_engine();
+    engine.session_mut().edit.rulers = vec!["samples".into()];
+    engine.session_mut().edit.edit_mode = soundcraft_model::EditMode::Slip;
+    let mut h = harness_with(engine);
+    let tl = timeline(&h);
+    let y = tl.min.y - 11.5;
+    let (a, b) = (pos2(tl.min.x + 100.0, y), pos2(tl.min.x + 300.0, y));
+    drag(&mut h, a, b);
+    let s = h.state().engine.session_arc();
+    let px = s.edit.zoom.samples_per_px.ceil() as i64;
+    let want = Range::new(sample_at(&s, tl, a.x), sample_at(&s, tl, b.x));
+    let got = s.edit.timeline_selection;
+    assert!((got.start - want.start).abs() <= px && (got.end - want.end).abs() <= px, "{got:?} vs {want:?}");
+    assert_eq!(s.edit.selection, got, "linked: the edit selection too");
+    assert_eq!(s.edit.selected_tracks.len(), s.tracks.iter().filter(|t| ops::shown(&s, t)).count(), "across every shown track");
+
+    // Unlinked: a drag sets only the timeline selection, and playback starts from it.
+    h.state_mut().run("options.link_timeline_edit", json!({"value": false})).unwrap();
+    h.state_mut().run("edit.select", json!({"start": 10, "end": 20})).unwrap();
+    h.step();
+    let (c, d) = (pos2(tl.min.x + 400.0, y), pos2(tl.min.x + 500.0, y));
+    drag(&mut h, c, d);
+    let ed = h.state().engine.session().edit.clone();
+    assert_eq!(ed.selection, Range::new(10, 20));
+    assert!((ed.timeline_selection.start - sample_at(&s, tl, c.x)).abs() <= px);
+    h.state_mut().play_from_selection();
+    assert_eq!(h.state().engine.transport.position, ed.timeline_selection.start);
+
+    // A click still locates.
+    h.state_mut().run("transport.stop", json!({})).unwrap();
+    h.step();
+    h.step();
+    click(&mut h, pos2(tl.min.x + 50.0, y));
+    assert!((h.state().engine.transport.position - sample_at(&s, tl, tl.min.x + 50.0)).abs() <= px);
+}
+
+#[test]
 fn dragging_a_marker_on_the_ruler_moves_it_in_one_undoable_step() {
     let mut engine = soundcraft_engine::demo::demo_engine();
     engine.session_mut().edit.rulers = vec!["markers".into()];

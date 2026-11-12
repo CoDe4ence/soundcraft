@@ -321,7 +321,8 @@ impl SoundApp {
     /// Play from the selection, honouring loop playback and selection end.
     pub fn play_from_selection(&mut self) {
         let s = self.engine.session();
-        let sel = s.edit.selection;
+        // Playback plays the timeline selection: the edit selection while they are linked.
+        let sel = if s.edit.link_timeline_edit { s.edit.selection } else { s.edit.timeline_selection };
         let preroll = if s.edit.pre_post_roll { s.edit.pre_roll } else { 0 };
         let postroll = if s.edit.pre_post_roll { s.edit.post_roll } else { 0 };
         if s.edit.loop_playback && !sel.is_empty() {

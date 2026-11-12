@@ -254,13 +254,27 @@ pub(super) fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect,
             _ => {
                 if let Some(f) = fmt {
                     timebase_ruler(&painter, &s, &RulerRow { tl, row, view, bottom: i + 1 == rulers.len() }, f, s.frame_rate);
-                    // Clicking a timebase ruler locates.
+                    // Unlinked, the timeline selection has a place of its own: shade it on the timebase rulers.
+                    let timeline = s.edit.timeline_selection;
+                    if !s.edit.link_timeline_edit && !timeline.is_empty() {
+                        let (x0, x1) = (x_of(&s, tl, timeline.start).max(row.min.x), x_of(&s, tl, timeline.end).min(row.max.x));
+                        if x1 > x0 {
+                            painter.rect_filled(Rect::from_min_max(pos2(x0, row.min.y), pos2(x1, row.max.y)), 0.0, t.selection);
+                        }
+                    }
+                    // Clicking a timebase ruler locates; dragging selects (the timeline selection, and
+                    // while linked the edit selection across every shown track).
                     let resp = ui.interact(row, ui.scope_id().with(("ruler", id.as_str())), Sense::click_and_drag());
-                    if (resp.clicked() || resp.dragged())
+                    if resp.clicked()
                         && let Some(p) = resp.interact_pointer_pos()
                     {
                         let at = sample_at(&s, tl, p.x).max(0);
                         let _ = app.run("transport.locate", json!({"at": at}));
+                    } else if resp.dragged()
+                        && let (Some(o), Some(p)) = (ui.input(|i| i.pointer.press_origin()), resp.interact_pointer_pos())
+                    {
+                        let (a, b) = (snap(&s, sample_at(&s, tl, o.x).max(0)), snap(&s, sample_at(&s, tl, p.x).max(0)));
+                        let _ = app.run("edit.select_timeline", json!({"start": a, "end": b}));
                     }
                 }
             }

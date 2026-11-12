@@ -33,6 +33,7 @@ mod setup_more;
 mod strip_silence;
 mod surround;
 mod tab;
+mod timeline_selection;
 mod track;
 mod track_more;
 mod transport;
@@ -144,6 +145,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(options::specs());
         v.extend(transport::specs());
         v.extend(tab::specs());
+        v.extend(timeline_selection::specs());
         v.extend(query::specs());
         v.extend(health::specs());
         v.extend(audiosuite::specs());
