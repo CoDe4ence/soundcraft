@@ -41,7 +41,7 @@ Ranked by how much a Pro Tools user would miss it.
 2. **With the link on, the two selections drift apart.** Only `edit.select` and Tab copy the edit selection to the timeline selection; Move Edit, Halve/Double, Select All, Restore Last Selection and recalling a memory location don't, so Play Timeline then plays the old range (checked: after Move Edit Right the edit selection was 2000–3000 and the timeline selection still 1000–2000).
 3. **Link Track and Edit Selection does nothing.** The option is saved and shown, but one track list serves as both the selected tracks and the edit selection's tracks, so they are always linked.
 4. **The counter's Start, End and Length can't be typed.** They are drawn as text only.
-5. **Mouse gaps:** Shift-click on another track adds only that track, not the tracks between; double-click in empty space doesn't select the gap between clips; triple-click doesn't select the whole track; dragging in a timebase ruler doesn't select.
+5. **Mouse gaps:** double-click in empty space doesn't select the gap between clips; triple-click doesn't select the whole track; dragging in a timebase ruler doesn't select. (Shift-click on another track adds only that track, so selected tracks needn't be adjacent; that is deliberate, as in Pro Tools.)
 6. **Keyboard gaps:** Shift+Home and Shift+End don't extend the selection to the session start or end; they do nothing.
 7. **Bugs in selection commands:**
    - Remove Edit from Top/Bottom take the first/last *selected* track, which is the order the tracks were selected in, not the top/bottom one (`edit.select` with `exact` keeps the given order). Checked: with Snare then Kick selected, Remove Edit from Top removed Snare, not Kick.

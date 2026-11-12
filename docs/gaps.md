@@ -245,7 +245,7 @@ imports) is done. Detail: [memory-locations.md](memory-locations.md). ≈ 1–3 
 Every Edit ▸ Selection command exists, but the timeline selection is invisible and can't be made on
 its own (so unlinking it changes almost nothing), and with the link on the two selections drift
 apart. Link Track and Edit Selection does nothing. The counter's Start/End/Length can't be typed.
-Shift-click doesn't span the tracks between, double-click in a gap and triple-click don't select,
+Double-click in a gap and triple-click don't select,
 a timebase ruler drag doesn't select, and Shift+Home/End don't extend. Remove Edit from Top/Bottom
 use selection order, Move Edit moves an insertion point one sample, and Double Edit can pass the
 session limit. Detail: [selection.md](selection.md). ≈ 15–25 h.
