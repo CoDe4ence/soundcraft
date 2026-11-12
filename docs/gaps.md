@@ -1,6 +1,6 @@
 # Where SoundCraft falls short of Pro Tools
 
-> **Last reviewed:** 2026-10-25 · **Last updated:** 2026-11-12 · **Change:** minor (G-24: selection; previously trivial: G-23 shrunk to keypad recall; previously minor: G-23 shrunk: memory location gaps closed; previously minor: G-23: memory locations depth; previously trivial: G-04: volume automation read at every sample, #1354; previously trivial: G-01: `setup.playback_engine` applies the device buffer in the desktop app; G-04: Clip Looping crossfade and loop count) · **Target:** Avid Pro Tools Ultimate 2026.4.1
+> **Last reviewed:** 2026-10-25 · **Last updated:** 2026-11-12 · **Change:** minor (G-24 shrunk to Link Track and Edit Selection; previously minor: G-24: selection; previously trivial: G-23 shrunk to keypad recall; previously minor: G-23 shrunk: memory location gaps closed; previously minor: G-23: memory locations depth; previously trivial: G-04: volume automation read at every sample, #1354; previously trivial: G-01: `setup.playback_engine` applies the device buffer in the desktop app; G-04: Clip Looping crossfade and loop count) · **Target:** Avid Pro Tools Ultimate 2026.4.1
 
 Every known shortfall, one entry each, ranked by how much it stops a Pro Tools user from doing
 real work in SoundCraft. This is the work list: pick from the top. Rows marked **alpha blocker**
@@ -38,7 +38,7 @@ When you close a gap, delete its entry (or shrink it) in the same PR, and bump t
 | G-21 | Compressed export (MP3, AAC/M4A, Ogg/Opus) | File formats | [file-format-parity.md](file-format-parity.md) | 10–20 |
 | G-22 | Avid cloud services (collaboration, Sketch, Splice, sign-in) | Ecosystem | — | not estimated (owner decision) |
 | G-23 | Memory locations: keypad recall in Commands Keyboard Focus while something is selected (needs a change in the shared egui fork) | UI/UX | [memory-locations.md](memory-locations.md) | 1–3 |
-| G-24 | Selection: invisible timeline selection, Link Track and Edit Selection unused, untypable Start/End/Length, mouse and keyboard gaps, bugs in Remove Edit/Move Edit/Double Edit | Features | [selection.md](selection.md) | 15–25 |
+| G-24 | Selection: Link Track and Edit Selection has no effect (the other selection gaps were fixed 2026-11-12) | Features | [selection.md](selection.md) | 5–8 |
 
 ## Details
 
@@ -242,18 +242,18 @@ imports) is done. Detail: [memory-locations.md](memory-locations.md). ≈ 1–3 
 
 ### G-24. Selection
 
-Every Edit ▸ Selection command exists, but the timeline selection is invisible and can't be made on
-its own (so unlinking it changes almost nothing), and with the link on the two selections drift
-apart. Link Track and Edit Selection does nothing. The counter's Start/End/Length can't be typed.
-Double-click in a gap and triple-click don't select,
-a timebase ruler drag doesn't select, and Shift+Home/End don't extend. Remove Edit from Top/Bottom
-use selection order, Move Edit moves an insertion point one sample, and Double Edit can pass the
-session limit. Detail: [selection.md](selection.md). ≈ 15–25 h.
+Fixed on 2026-11-12: the timeline selection is made in the timebase rulers, drawn, played by Space
+and kept with the edit selection while linked; Start/End/Length are typed in the counter;
+Shift+Home/End extend; double-click selects a gap and triple-click a track; Remove Edit, Move Edit
+and Double Edit are fixed. What remains: Link Track and Edit Selection has no effect, because one
+track list is both the selected tracks and the edit selection's tracks. Detail:
+[selection.md](selection.md). ≈ 5–8 h.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | G-24 shrunk to 5–8 h: the selection gaps fixed except Link Track and Edit Selection |
 | 2026-11-12 | minor | Added G-24 (selection) from a code read; see selection.md |
 | 2026-11-12 | trivial | G-23 shrunk to 1–3 h: window columns and sorting, typed times; keypad recall in Commands Focus remains (egui fork) |
 | 2026-11-12 | minor | G-23 shrunk from 20–35 h to 3–6 h: the memory location gaps closed; column choice, typed positions and keypad recall in Commands Focus remain |
