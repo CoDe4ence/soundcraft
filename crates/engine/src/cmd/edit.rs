@@ -302,6 +302,9 @@ fn cut_copy(e: &mut Engine, p: &Value, cut: bool, id: &str) -> Result<Value> {
         for t in &tracks {
             cut_track(s, *t, range, sh, follow);
         }
+        if sh {
+            ops::follow_ruler_markers(s, &tracks, range.end, -range.len());
+        }
         s.edit.selection = soundcraft_time::Range::point(range.start);
         cb.cut_from = Some(range.start);
     }
@@ -356,6 +359,14 @@ fn paste(e: &mut Engine, p: &Value) -> Result<Value> {
             cut_track(s, *t, r, true, follow);
         }
         pasted += ops::paste(s, *t, at, clips, cb.length, sh).map_err(|why| bad("edit.paste", why))?.len();
+        // Ruler markers follow once, after the last track (they belong to all of them).
+        if sh && i + 1 == tracks.len() {
+            if let Some(r) = replace {
+                ops::follow_ruler_markers(s, &tracks, r.end, -r.len());
+            }
+            let room = cb.length.max(clips.iter().map(soundcraft_model::Clip::end).max().unwrap_or(0));
+            ops::follow_ruler_markers(s, &tracks, at, room);
+        }
         if follow && let (Some(lanes), Some(tr)) = (cb.automation.get(i % cb.automation.len().max(1)), s.track_mut(*t)) {
             for l in lanes {
                 let dst = tr.lane_mut(&l.param);
@@ -386,6 +397,9 @@ fn clear(e: &mut Engine, p: &Value) -> Result<Value> {
     } else {
         for t in &tracks {
             n += ops::clear_range(s, *t, range, sh).len();
+        }
+        if sh {
+            ops::follow_ruler_markers(s, &tracks, range.end, -range.len());
         }
     }
     Ok(json!({"removed": n}))
@@ -602,6 +616,9 @@ fn duplicate(e: &mut Engine, p: &Value) -> Result<Value> {
             }
         }
     }
+    if sh {
+        ops::follow_ruler_markers(s, &tracks, range.end, range.len());
+    }
     s.edit.selection = range.shifted(range.len());
     Ok(json!({"clips": n}))
 }
@@ -621,6 +638,9 @@ fn repeat(e: &mut Engine, p: &Value) -> Result<Value> {
             let at = range.start.saturating_add(range.len().saturating_mul(k));
             ops::paste(s, *t, at, &clips, range.len(), sh).map_err(|why| bad("edit.repeat", why))?;
         }
+    }
+    if sh {
+        ops::follow_ruler_markers(s, &tracks, range.end, range.len().saturating_mul(count));
     }
     Ok(json!({"repeats": count}))
 }
@@ -651,6 +671,9 @@ fn insert_silence(e: &mut Engine, p: &Value) -> Result<Value> {
                 }
             }
         }
+    }
+    if sh {
+        ops::follow_ruler_markers(s, &tracks, range.start, range.len());
     }
     Ok(json!({"inserted": range.len()}))
 }

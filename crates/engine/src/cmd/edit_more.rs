@@ -569,6 +569,9 @@ fn duplicate_extend(e: &mut Engine, p: &Value) -> Result<Value> {
             }
         }
     }
+    if sh {
+        ops::follow_ruler_markers(s, &tracks, r.end, r.len());
+    }
     s.edit.selection = Range::new(r.start, r.end.saturating_add(r.len()));
     if s.edit.link_timeline_edit {
         s.edit.timeline_selection = s.edit.selection;
@@ -740,6 +743,9 @@ fn to_playlist(e: &mut Engine, p: &Value, dest: Dest, mv: bool, id: &str) -> Res
             ops::clear_range(s, *t, r, sh);
         }
         out.push(json!({"track": t, "playlist": idx}));
+    }
+    if mv && sh {
+        ops::follow_ruler_markers(s, &tracks, r.end, -r.len());
     }
     Ok(json!({"tracks": out}))
 }

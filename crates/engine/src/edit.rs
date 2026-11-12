@@ -223,6 +223,7 @@ pub fn clear_range(s: &mut Session, track: TrackId, range: Range, shuffle: bool)
     if shuffle {
         let moved = ripple(s, track, range.end, -range.len());
         follow_automation(s, track, range.end, moved);
+        follow_lane_markers(s, track, range.end, moved);
     }
     removed
 }
@@ -414,6 +415,46 @@ fn follow_automation(s: &mut Session, track: TrackId, from: Samples, (by, lock):
     }
 }
 
+/// Markers Follow Edit for a Shuffle ripple on one track (`moved` from [`ripple`]): that track's
+/// lane markers from `from` up to the lock move with its clips, and when material closes up the
+/// ones in the span that goes away go too. Ruler markers belong to every track and follow only
+/// edits made on all of them (see [`follow_ruler_markers`]).
+fn follow_lane_markers(s: &mut Session, track: TrackId, from: Samples, (by, lock): (Samples, Samples)) {
+    if !s.edit.markers_follow_edit || by == 0 {
+        return;
+    }
+    shift_markers(s, |m| m.track == Some(track), from, by, lock);
+}
+
+/// Markers Follow Edit for a Shuffle edit on `tracks` that inserted time at `from` (`by > 0`) or
+/// removed `[from + by, from)` (`by < 0`): the ruler markers follow when the edit was made on every
+/// track that holds clips, as removing or inserting time across the session does. Locked clips
+/// don't hold ruler markers back (each track stops at its own lock; the ruler has none).
+pub fn follow_ruler_markers(s: &mut Session, tracks: &[TrackId], from: Samples, by: Samples) {
+    if !s.edit.markers_follow_edit || by == 0 {
+        return;
+    }
+    let every_track = s.tracks.iter().filter(|t| t.playlist().is_some()).all(|t| tracks.contains(&t.id));
+    if every_track {
+        shift_markers(s, |m| m.track.is_none(), from, by, Samples::MAX);
+    }
+}
+
+/// Moves the markers `which` picks that start in `[from, lock)` by `by`; when `by < 0` the ones in
+/// the span that closes, `[from + by, from)`, are removed (as Cut Time removes them).
+fn shift_markers(s: &mut Session, which: impl Fn(&soundcraft_model::MemoryLocation) -> bool, from: Samples, by: Samples, lock: Samples) {
+    if by < 0 {
+        let gone = from.saturating_add(by);
+        s.markers.retain(|m| !(which(m) && m.start >= gone && m.start < from));
+    }
+    for m in s.markers.iter_mut().filter(|m| which(m) && m.start >= from && m.start < lock) {
+        let len = m.end.saturating_sub(m.start);
+        m.start = m.start.saturating_add(by).max(0);
+        m.end = m.start.saturating_add(len);
+    }
+    s.markers.sort_by_key(|m| m.start);
+}
+
 /// With Automation Follows Edit, take the points in `[start, end)` off a track, timed from `origin`.
 fn take_automation(s: &mut Session, track: TrackId, start: Samples, end: Samples, origin: Samples) -> Vec<(AutoParam, AutomationPoint)> {
     let mut out = Vec::new();
@@ -467,6 +508,7 @@ pub fn make_room(s: &mut Session, track: TrackId, at: Samples, len: Samples) -> 
     separate_at(s, track, at);
     let moved = ripple(s, track, at, len);
     follow_automation(s, track, at, moved);
+    follow_lane_markers(s, track, at, moved);
     Ok(())
 }
 
@@ -770,6 +812,7 @@ fn lift_all(s: &mut Session, track: TrackId, moving: &HashSet<ClipId>) -> Vec<(C
     for l in &lifts {
         points.insert(l.id, take_automation(s, track, l.from, l.from.saturating_add(l.shift), l.start));
         follow_automation(s, track, l.from.saturating_add(l.shift), (l.by, l.lock));
+        follow_lane_markers(s, track, l.from.saturating_add(l.shift), (l.by, l.lock));
     }
     let Some(pl) = s.track_mut(track).and_then(|t| t.playlist_mut()) else { return Vec::new() };
     let starts: HashMap<ClipId, Samples> = staying.iter().map(|c| (c.id, c.start)).collect();
@@ -894,6 +937,7 @@ pub fn trim_clip(s: &mut Session, id: ClipId, start: Option<Samples>, end: Optio
     if shuffle {
         let moved = ripple(s, track, old.start.saturating_add(1), c.end().saturating_sub(old.end()));
         follow_automation(s, track, old.end(), moved);
+        follow_lane_markers(s, track, old.end(), moved);
     }
     Some(c)
 }

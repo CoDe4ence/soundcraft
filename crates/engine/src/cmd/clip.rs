@@ -168,6 +168,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 let at = if sh { crate::edit::shuffle_slot(s, t, at, &[]) } else { at };
                 if sh {
                     crate::edit::make_room(s, t, at, len).map_err(|why| bad("clip.place_source", why))?;
+                    crate::edit::follow_ruler_markers(s, &[t], at, len);
                 }
                 let id = s.new_clip_id();
                 crate::edit::place_clip(s, t, soundcraft_model::Clip::audio(id, name, src, 0, at, len));
