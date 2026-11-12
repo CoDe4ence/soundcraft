@@ -24,6 +24,7 @@ mod idle;
 mod key_families;
 mod long_menu_scroll;
 mod marker_rename;
+mod memory_recall_keys;
 mod menu_search;
 mod midi_double_click;
 mod midi_editor_keys;

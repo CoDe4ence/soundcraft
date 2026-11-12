@@ -411,6 +411,9 @@ pub struct SoundApp {
     sim: Option<(Samples, Option<Samples>, Option<Range>)>,
     /// When Record last found nothing to record on, and why: the Record buttons show it for a moment.
     record_hint: Option<(f64, &'static str)>,
+    /// The digits typed after Period while recalling a memory location by number (Period, number,
+    /// Period); `None` when not entering one.
+    pub(crate) location_entry: Option<String>,
     pub quit_requested: bool,
     /// Reset floating-window positions next frame (Window › Arrange).
     pub arrange_request: bool,

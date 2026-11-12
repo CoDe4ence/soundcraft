@@ -104,6 +104,7 @@ impl SoundApp {
             docking_context: None,
             sim: None,
             record_hint: None,
+            location_entry: None,
             quit_requested: false,
             arrange_request: false,
             touched: std::collections::HashSet::new(),

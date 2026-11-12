@@ -92,7 +92,7 @@ pub fn handle(app: &mut SoundApp, ctx: &egui::Context) {
             }
             continue;
         }
-        if fixed(app, key, mods, mac) {
+        if location_entry(app, key, mods) || fixed(app, key, mods, mac) {
             continue;
         }
         if let Some(id) = command_for(key, mods, mac) {
@@ -108,6 +108,70 @@ pub fn handle(app: &mut SoundApp, ctx: &egui::Context) {
     }
     // Tab moves the insertion point here, so egui must not also hand focus to the first widget: that would block every shortcut.
     ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+}
+
+/// Most digits a memory location number typed after Period may have.
+const MAX_LOCATION_DIGITS: usize = 5;
+
+/// Recalling a memory location by number: Period, its number, Period. Escape cancels; any other key
+/// cancels and then does its usual job. In Commands Keyboard Focus Period nudges, and the numeric
+/// keypad's Period can't be told apart from the main keyboard's: there it starts an entry only when
+/// there is nothing to nudge, so a nudge is never delayed or lost. Returns true when the key was
+/// taken.
+fn location_entry(app: &mut SoundApp, key: Key, m: Modifiers) -> bool {
+    let plain = !m.command && !m.alt && !m.ctrl && !m.shift;
+    let digit = match key {
+        Key::Num0 => Some('0'),
+        Key::Num1 => Some('1'),
+        Key::Num2 => Some('2'),
+        Key::Num3 => Some('3'),
+        Key::Num4 => Some('4'),
+        Key::Num5 => Some('5'),
+        Key::Num6 => Some('6'),
+        Key::Num7 => Some('7'),
+        Key::Num8 => Some('8'),
+        Key::Num9 => Some('9'),
+        _ => None,
+    };
+    let Some(typed) = app.location_entry.clone() else {
+        let commands = app.engine.session().edit.keyboard_focus == "commands";
+        let can_nudge = soundcraft_engine::find_command("edit.nudge").is_some_and(|c| (c.enabled)(&app.engine).is_ok());
+        if key == Key::Period && plain && !(commands && can_nudge) {
+            app.location_entry = Some(String::new());
+            app.ui.status = "Memory location: .".into();
+            return true;
+        }
+        return false;
+    };
+    match (key, digit) {
+        (Key::Period, _) if plain => {
+            app.location_entry = None;
+            app.ui.status.clear();
+            if let Ok(n) = typed.parse::<u32>() {
+                crate::panels::memory::recall(app, n);
+            }
+            true
+        }
+        (_, Some(d)) if plain => {
+            let mut typed = typed;
+            if typed.len() < MAX_LOCATION_DIGITS {
+                typed.push(d);
+            }
+            app.ui.status = format!("Memory location: .{typed}");
+            app.location_entry = Some(typed);
+            true
+        }
+        (Key::Escape, _) => {
+            app.location_entry = None;
+            app.ui.status.clear();
+            true
+        }
+        _ => {
+            app.location_entry = None;
+            app.ui.status.clear();
+            false
+        }
+    }
 }
 
 /// The command a host auto-repeat of this chord runs, if it is one of [`REPEATING`]. A repeat
@@ -603,5 +667,13 @@ mod tests {
             });
             output.textures_delta.clear();
         }
+    }
+}
+
+impl SoundApp {
+    /// The digits typed so far while recalling a memory location by number (see Period, number,
+    /// Period); `None` when no entry is open.
+    pub fn location_entry(&self) -> Option<&str> {
+        self.location_entry.as_deref()
     }
 }
