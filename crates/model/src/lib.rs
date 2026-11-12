@@ -18,7 +18,7 @@ mod track;
 pub use automation::{AutoParam, AutomationLane, AutomationMode, AutomationPoint};
 pub use clip::{Clip, ClipContent, Fade, FadeShape};
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
-pub use markers::{Group, MarkerKind, MemoryLocation};
+pub use markers::{Group, LocationView, MarkerKind, MemoryLocation, StoredZoom};
 pub use mixer::{
     Bus, ChannelFormat, INSERT_SLOTS, Insert, Mixer, OutputPath, Route, SEND_SLOTS, SendSlot, Speaker, SurroundPan, fader_db_to_pos, fader_pos_to_db,
 };

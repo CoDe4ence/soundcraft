@@ -34,6 +34,64 @@ pub struct MemoryLocation {
     /// Track-lane marker on this track, if any.
     #[serde(default)]
     pub track: Option<TrackId>,
+    /// The view settings this location recalls along with its place (General Properties).
+    #[serde(default, skip_serializing_if = "LocationView::is_empty")]
+    pub view: LocationView,
+}
+
+/// The view settings a memory location can store. Each is recalled only when stored, and only
+/// for tracks and groups that still exist.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct LocationView {
+    /// Zoom: samples per point and the left edge of the view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<StoredZoom>,
+    /// Pre-roll and post-roll lengths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_post_roll: Option<(Samples, Samples)>,
+    /// The tracks hidden when it was stored; recalling shows every other track (so tracks made
+    /// later stay shown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden_tracks: Option<Vec<TrackId>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_heights: Option<Vec<(TrackId, crate::TrackHeight)>>,
+    /// Which groups were active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_enables: Option<Vec<(GroupId, bool)>>,
+    /// A window configuration by number (1-based); the UI recalls it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_config: Option<u32>,
+}
+
+/// A stored zoom (see [`LocationView::zoom`]).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StoredZoom {
+    pub samples_per_px: f64,
+    pub scroll: Samples,
+}
+
+impl LocationView {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The names of the settings stored, as `markers.add`'s `store` takes them.
+    pub fn stored(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        for (name, on) in [
+            ("zoom", self.zoom.is_some()),
+            ("pre_post_roll", self.pre_post_roll.is_some()),
+            ("track_visibility", self.hidden_tracks.is_some()),
+            ("track_heights", self.track_heights.is_some()),
+            ("group_enables", self.group_enables.is_some()),
+            ("window_config", self.window_config.is_some()),
+        ] {
+            if on {
+                out.push(name);
+            }
+        }
+        out
+    }
 }
 
 fn one() -> u8 {

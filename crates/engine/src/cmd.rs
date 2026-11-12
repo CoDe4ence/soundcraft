@@ -20,6 +20,7 @@ mod event_more;
 mod file;
 mod health;
 mod instrument;
+mod marker_view;
 mod midi;
 mod mix;
 mod more_util;

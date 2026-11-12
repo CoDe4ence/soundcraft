@@ -602,6 +602,12 @@ fn import_markers(s: &mut Session, other: &Session, track_map: &std::collections
         if let Some(x) = s.markers.iter_mut().find(|x| x.id == id) {
             let number = x.number;
             *x = soundcraft_model::MemoryLocation { id, number, track, start: x.start, end: x.end, ..m.clone() };
+            // Stored view settings name the donor's tracks: keep the imported ones under their new
+            // ids. Groups don't come along, so their enables don't either.
+            let tracks = |ids: &[TrackId]| ids.iter().filter_map(|t| track_map.get(t).copied()).collect::<Vec<_>>();
+            x.view.hidden_tracks = m.view.hidden_tracks.as_deref().map(tracks);
+            x.view.track_heights = m.view.track_heights.as_ref().map(|hs| hs.iter().filter_map(|(t, h)| Some((*track_map.get(t)?, *h))).collect());
+            x.view.group_enables = None;
         }
         added += 1;
     }
@@ -771,6 +777,8 @@ mod tests {
         let mut donor = crate::demo::demo_engine();
         donor.execute("markers.add", &json!({"name": "Bridge", "kind": "selection", "start": 96_000, "end": 192_000, "ruler": 3})).unwrap();
         donor.execute("markers.edit", &json!({"name": "Bridge", "comments": "double it", "color": [10, 20, 30]})).unwrap();
+        donor.execute("track.group", &json!({"tracks": ["Kick", "Keys"], "name": "G"})).unwrap();
+        donor.execute("markers.edit", &json!({"name": "Bridge", "store": ["track_heights", "group_enables", "track_visibility"]})).unwrap();
         let kick = donor.session().track_by_name("Kick").unwrap().id;
         let keys = donor.session().track_by_name("Keys").unwrap().id;
         let on_kick = donor.session_mut().add_marker("Kick hit", soundcraft_model::MarkerKind::Marker, 1_000, 1_000);
@@ -798,6 +806,9 @@ mod tests {
         );
         let new_kick = s.track_by_name("Kick").unwrap().id;
         assert_eq!(s.markers.iter().find(|m| m.name == "Kick hit").and_then(|m| m.track), Some(new_kick));
+        let heights: Vec<_> = bridge.view.track_heights.iter().flatten().map(|(t, _)| *t).collect();
+        assert_eq!(heights, vec![new_kick], "stored heights name the imported track under its new id, and only it");
+        assert_eq!((bridge.view.group_enables.as_ref(), bridge.view.hidden_tracks.as_deref()), (None, Some(&[][..])), "groups don't come along");
         assert!(!s.markers.iter().any(|m| m.name == "Keys hit"));
         let mut numbers: Vec<u32> = s.markers.iter().map(|m| m.number).collect();
         numbers.sort_unstable();

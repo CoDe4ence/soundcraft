@@ -89,13 +89,29 @@ pub fn specs() -> Vec<CommandSpec> {
             "New Memory Location",
             [],
             Some("Enter"),
-            "{name?, at?, start?, end?, kind?: marker|selection|none, ruler?: 1..5}",
+            "{name?, at?, start?, end?, kind?: marker|selection|none, ruler?: 1..5, store?: [zoom|pre_post_roll|track_visibility|track_heights|group_enables|window_config], window_config?: n} — `store` captures those view settings now, for recall",
             always,
             add_marker
         ),
         cmd!("markers.delete", "Delete Memory Location", [], None, "{number | id}", always, delete_marker),
-        cmd!("markers.edit", "Edit Memory Location", [], None, "{number | id, name?, comments?, at?, color?: [r,g,b] | null}", always, edit_marker),
-        cmd!(noundo "markers.recall", "Recall Memory Location", [], Some("Period + n + Period"), "{number}", always, recall_marker),
+        cmd!(
+            "markers.edit",
+            "Edit Memory Location",
+            [],
+            None,
+            "{number | id, name?, comments?, at?, color?: [r,g,b] | null, store?: [settings], forget?: [settings], window_config?: n} — settings as in markers.add",
+            always,
+            edit_marker
+        ),
+        cmd!(
+            noundo "markers.recall",
+            "Recall Memory Location",
+            [],
+            Some("Period + n + Period"),
+            "{number} → {at, window_config, recalled} — a marker or selection goes to its place; the view settings it stores are recalled too (a `none` location recalls only those)",
+            always,
+            recall_marker
+        ),
         cmd!(noundo "markers.next", "Go to Next Marker", [], None, "{}", always, |e, _| step_marker(e, 1)),
         cmd!(noundo "markers.previous", "Go to Previous Marker", [], None, "{}", always, |e, _| step_marker(e, -1)),
     ]
@@ -333,9 +349,12 @@ fn add_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     // The default name carries the number the location gets, so the two agree after a delete.
     let n = s.markers.iter().map(|m| m.number).max().unwrap_or(0).saturating_add(1);
     let name = str_param(p, "name").map_or_else(|| format!("Marker {n}"), str::to_string);
+    let mut view = soundcraft_model::LocationView::default();
+    super::marker_view::update("markers.add", s, p, &mut view)?;
     let id = s.add_marker(&name, kind, a.max(0), b.max(a).max(0));
     if let Some(m) = s.markers.iter_mut().find(|m| m.id == id) {
         m.ruler = i64_or(p, "ruler", 1).clamp(1, 5) as u8;
+        m.view = view;
     }
     let number = s.marker(id).map_or(0, |m| m.number);
     Ok(json!({"id": id, "number": number}))
@@ -377,7 +396,10 @@ fn edit_marker(e: &mut Engine, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad("markers.edit", "`color` must be [r,g,b] or null")),
     };
     let s = e.session_mut();
+    let mut view = s.markers.get(i).map(|m| m.view.clone()).unwrap_or_default();
+    super::marker_view::update("markers.edit", s, p, &mut view)?;
     let Some(m) = s.markers.get_mut(i) else { return Err(bad("markers.edit", "gone")) };
+    m.view = view;
     if let Some(c) = color {
         m.color = c;
     }
@@ -402,14 +424,18 @@ fn recall_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session();
     let Some(m) = s.markers.get(i).cloned() else { return Err(bad("markers.recall", "gone")) };
     let s = e.session_mut();
-    match m.kind {
-        MarkerKind::Marker => s.edit.selection = soundcraft_time::Range::point(m.start),
-        MarkerKind::Selection => s.edit.selection = soundcraft_time::Range::new(m.start, m.end),
-        MarkerKind::None => {}
+    let mut out = super::marker_view::recall(s, &m.view);
+    // A `none` location has no place: it recalls only its view settings.
+    if m.kind != MarkerKind::None {
+        s.edit.selection = match m.kind {
+            MarkerKind::Selection => soundcraft_time::Range::new(m.start, m.end),
+            _ => soundcraft_time::Range::point(m.start),
+        };
+        s.edit.playhead = m.start;
+        e.transport_requests.push(crate::TransportRequest::Locate(m.start));
+        out["at"] = json!(m.start);
     }
-    s.edit.playhead = m.start;
-    e.transport_requests.push(crate::TransportRequest::Locate(m.start));
-    Ok(json!({"at": m.start}))
+    Ok(out)
 }
 
 fn step_marker(e: &mut Engine, dir: i64) -> Result<Value> {

@@ -702,6 +702,7 @@ impl Session {
             color: None,
             ruler: 1,
             track: None,
+            view: crate::LocationView::default(),
         });
         self.markers.sort_by_key(|m| m.start);
         id

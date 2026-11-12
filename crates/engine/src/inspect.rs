@@ -78,7 +78,10 @@ pub fn session(e: &Engine, full: bool) -> Value {
         "length_samples": s.content_end(),
         "tracks": s.tracks.iter().map(|t| track_json(e, t, full)).collect::<Vec<_>>(),
         "busses": s.busses.iter().map(|b| json!({"id": b.id, "name": b.name, "format": b.format.label()})).collect::<Vec<_>>(),
-        "markers": s.markers.iter().map(|m| json!({"id": m.id, "number": m.number, "name": m.name, "kind": m.kind, "start": m.start, "end": m.end})).collect::<Vec<_>>(),
+        "markers": s.markers.iter().map(|m| json!({
+            "id": m.id, "number": m.number, "name": m.name, "kind": m.kind, "start": m.start, "end": m.end, "comments": m.comments,
+            "color": m.color, "ruler": m.ruler, "track": m.track, "stored": m.view.stored(), "window_config": m.view.window_config,
+        })).collect::<Vec<_>>(),
         "groups": s.groups.iter().map(|g| json!({"id": g.id, "name": g.name, "letter": g.letter, "members": g.members, "active": g.active})).collect::<Vec<_>>(),
         "sources": s.sources.iter().map(|x| json!({
             "id": x.id, "name": x.name, "channels": x.channels, "frames": x.frames, "path": x.path,

@@ -9,7 +9,7 @@ use soundcraft_model::{ClipId, SourceId};
 mod about;
 mod clips;
 mod history;
-mod memory;
+pub(crate) mod memory;
 mod plugins;
 mod tracks;
 mod transport;
