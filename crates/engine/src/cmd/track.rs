@@ -783,6 +783,8 @@ fn delete(e: &mut Engine, p: &Value) -> Result<Value> {
     for g in &mut s.groups {
         g.members.retain(|t| !tracks.contains(t));
     }
+    // A track's lane markers go with it (undo brings both back).
+    s.markers.retain(|m| m.track.is_none_or(|t| !tracks.contains(&t)));
     for (bus, replacement) in removed_busses {
         s.busses.retain(|candidate| candidate.id != bus);
         reroute_deleted_bus(s, bus, &replacement);

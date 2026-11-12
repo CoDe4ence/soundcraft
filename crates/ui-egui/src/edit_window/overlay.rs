@@ -17,13 +17,27 @@ pub(super) fn overlay(app: &mut SoundApp, ui: &mut Ui, tl: Rect, area: Rect) {
     let s = app.engine.session();
     let painter = ui.painter().with_clip_rect(area);
     if s.edit.flag("view.marker.ruler_lines") {
+        let folder_lines = s.edit.flag("view.marker.folder_lines");
         for m in &s.markers {
             let x = x_of(s, tl, m.start);
-            if x > tl.min.x && x < tl.max.x {
-                painter.line_segment(
-                    [pos2(x, tl.min.y), pos2(x, tl.max.y)],
-                    Stroke::new(1.0, m.color.map_or(Color32::from_rgba_unmultiplied(232, 200, 64, 70), |c| rgb(c).gamma_multiply(0.4))),
-                );
+            if x <= tl.min.x || x >= tl.max.x {
+                continue;
+            }
+            let stroke = Stroke::new(1.0, m.color.map_or(Color32::from_rgba_unmultiplied(232, 200, 64, 70), |c| rgb(c).gamma_multiply(0.4)));
+            match m.track {
+                // A ruler marker's line runs down every track.
+                None => {
+                    painter.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], stroke);
+                }
+                // A lane marker's runs down its own track, and with Folder Lines the folders it is in.
+                Some(own) => {
+                    for (id, r) in &app.edit_layout.rows {
+                        let row = TrackId(*id);
+                        if row == own || (folder_lines && super::lane_markers::inside(s, own, row)) {
+                            painter.line_segment([pos2(x, r[1].max(tl.min.y)), pos2(x, r[3])], stroke);
+                        }
+                    }
+                }
             }
         }
     }

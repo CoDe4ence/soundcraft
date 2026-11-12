@@ -122,6 +122,8 @@ pub(super) fn track_row(app: &mut SoundApp, ui: &mut Ui, id: TrackId, row: Rect,
         draw_strip_silence(&painter, &s, tl, lane, ranges);
     }
     lane_interaction(app, ui, track, lane, tl);
+    // After the lane, so the strip gets its clicks first.
+    super::lane_markers::strip(app, ui, track, lane, tl);
     if track.view == "playlists" {
         playlist_lanes(app, ui, track, row, main_h, tl);
     }

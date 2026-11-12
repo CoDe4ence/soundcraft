@@ -184,7 +184,25 @@ pub(super) fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect,
                     _ => 1,
                 };
                 painter.rect_filled(row, 0.0, if id == "chords" { Color32::from_rgb(40, 56, 60) } else { t.marker_ruler });
-                for m in s.markers.iter().filter(|m| m.ruler == lane || (lane == 1 && m.ruler == 0)) {
+                // Track-lane markers are drawn on their tracks, not on the rulers.
+                let on_lane = |m: &&soundcraft_model::MemoryLocation| m.track.is_none() && (m.ruler == lane || (lane == 1 && m.ruler == 0));
+                // Ruler Lane Color: each marker's colour runs to the next one on the lane.
+                if s.edit.flag("view.marker.ruler_lane_color") {
+                    let mut starts: Vec<&soundcraft_model::MemoryLocation> = s.markers.iter().filter(on_lane).collect();
+                    starts.sort_by_key(|m| m.start);
+                    for (k, m) in starts.iter().enumerate() {
+                        let x0 = x_of(&s, tl, m.start);
+                        let x1 = starts.get(k + 1).map_or(row.max.x, |n| x_of(&s, tl, n.start));
+                        if x1 > x0 {
+                            painter.rect_filled(
+                                Rect::from_min_max(pos2(x0, row.min.y), pos2(x1, row.max.y)),
+                                0.0,
+                                super::lane_markers::colour(m).gamma_multiply(0.25),
+                            );
+                        }
+                    }
+                }
+                for m in s.markers.iter().filter(on_lane) {
                     let x = x_of(&s, tl, m.start);
                     let col = m.color.map_or(Color32::from_rgb(232, 200, 64), rgb);
                     if m.kind == soundcraft_model::MarkerKind::Selection {
@@ -210,7 +228,7 @@ pub(super) fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect,
                     let hit = s
                         .markers
                         .iter()
-                        .filter(|m| m.ruler == lane || (lane == 1 && m.ruler == 0))
+                        .filter(|m| m.track.is_none() && (m.ruler == lane || (lane == 1 && m.ruler == 0)))
                         .find(|m| (x_of(&s, tl, m.start) - p.x).abs() < 8.0);
                     if resp.double_clicked() {
                         match hit {

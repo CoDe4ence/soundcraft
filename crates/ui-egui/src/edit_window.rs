@@ -18,6 +18,7 @@ mod clips;
 mod drag;
 mod header;
 mod input;
+mod lane_markers;
 mod layout;
 mod overlay;
 mod rulers;

@@ -89,7 +89,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "New Memory Location",
             [],
             Some("Enter"),
-            "{name?, at?, start?, end?, kind?: marker|selection|none, ruler?: 1..5, store?: [zoom|pre_post_roll|track_visibility|track_heights|group_enables|window_config], window_config?: n} — `store` captures those view settings now, for recall",
+            "{name?, at?, start?, end?, kind?: marker|selection|none, ruler?: 1..5, track?: id|name (a track-lane marker), store?: [zoom|pre_post_roll|track_visibility|track_heights|group_enables|window_config], window_config?: n} — `store` captures those view settings now, for recall",
             always,
             add_marker
         ),
@@ -99,7 +99,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit Memory Location",
             [],
             None,
-            "{number | id, name?, comments?, at?, color?: [r,g,b] | null, store?: [settings], forget?: [settings], window_config?: n} — settings as in markers.add",
+            "{number | id, name?, comments?, at?, color?: [r,g,b] | null, ruler?: 1..5, track?: id|name|null (null: back to the ruler), store?: [settings], forget?: [settings], window_config?: n} — settings as in markers.add",
             always,
             edit_marker
         ),
@@ -325,7 +325,19 @@ fn add_note(e: &mut Engine, p: &Value) -> Result<Value> {
     }
 }
 
+/// Where a new marker goes when `markers.add` names neither a `track` nor a `ruler`: with Options ▸
+/// Marker Target Follows First Selected Track, onto that track's lane; otherwise the ruler.
+const TARGET_FOLLOWS_TRACK: &str = "options.marker_target_follows_first_selected_track";
+
 fn add_marker(e: &mut Engine, p: &Value) -> Result<Value> {
+    let track = match super::track_param(e, "markers.add", p, "track")? {
+        Some(t) => Some(t),
+        None if p.get("ruler").is_none() && e.session().edit.flag(TARGET_FOLLOWS_TRACK) => {
+            let s = e.session();
+            s.tracks.iter().find(|t| s.edit.selected_tracks.contains(&t.id)).map(|t| t.id)
+        }
+        None => None,
+    };
     let sel = e.session().edit.selection;
     let at = position_param(e, "markers.add", p, "at")?;
     let st = position_param(e, "markers.add", p, "start")?;
@@ -355,6 +367,7 @@ fn add_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     if let Some(m) = s.markers.iter_mut().find(|m| m.id == id) {
         m.ruler = i64_or(p, "ruler", 1).clamp(1, 5) as u8;
         m.view = view;
+        m.track = track;
     }
     let number = s.marker(id).map_or(0, |m| m.number);
     Ok(json!({"id": id, "number": number}))
@@ -395,11 +408,27 @@ fn edit_marker(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         Some(_) => return Err(bad("markers.edit", "`color` must be [r,g,b] or null")),
     };
+    // `track`: a track id or name puts it on that track's lane, null back on the ruler.
+    let track = match p.get("track") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(_) => Some(super::track_param(e, "markers.edit", p, "track")?),
+    };
+    let ruler = match p.get("ruler") {
+        None => None,
+        Some(v) => Some(v.as_u64().filter(|r| (1..=5).contains(r)).ok_or_else(|| bad("markers.edit", "`ruler` must be 1..5"))? as u8),
+    };
     let s = e.session_mut();
     let mut view = s.markers.get(i).map(|m| m.view.clone()).unwrap_or_default();
     super::marker_view::update("markers.edit", s, p, &mut view)?;
     let Some(m) = s.markers.get_mut(i) else { return Err(bad("markers.edit", "gone")) };
     m.view = view;
+    if let Some(t) = track {
+        m.track = t;
+    }
+    if let Some(r) = ruler {
+        m.ruler = r;
+    }
     if let Some(c) = color {
         m.color = c;
     }
@@ -576,6 +605,43 @@ mod tests {
         let r = e.execute("markers.add", &json!({"name": "M"})).unwrap();
         let m = e.session().markers.iter().find(|m| Some(m.id.0) == r["id"].as_u64()).map(|m| (m.start, m.end));
         assert_eq!(m, Some((4800, 4800)));
+    }
+
+    #[test]
+    fn track_lane_markers_are_made_moved_and_go_with_their_track() {
+        let mut e = demo_engine();
+        let kick = e.session().track_by_name("Kick").unwrap().id;
+        let snare = e.session().track_by_name("Snare").unwrap().id;
+        let track_of = |e: &crate::Engine, n: u64| e.session().markers.iter().find(|m| u64::from(m.number) == n).unwrap().track;
+
+        let n = e.execute("markers.add", &json!({"at": 100, "track": "Kick"})).unwrap()["number"].as_u64().unwrap();
+        assert_eq!(track_of(&e, n), Some(kick));
+        assert!(e.execute("markers.add", &json!({"at": 100, "track": "Nobody"})).is_err());
+
+        // Marker Target Follows First Selected Track: the first selected track in track order.
+        e.execute("options.marker_target_follows_selection", &json!({"value": true})).unwrap();
+        e.session_mut().edit.selected_tracks = vec![snare, kick];
+        let first = e.session().tracks.iter().find(|t| t.id == kick || t.id == snare).unwrap().id;
+        let m = e.execute("markers.add", &json!({"at": 200})).unwrap()["number"].as_u64().unwrap();
+        assert_eq!(track_of(&e, m), Some(first));
+        let ruler = e.execute("markers.add", &json!({"at": 300, "ruler": 2})).unwrap()["number"].as_u64().unwrap();
+        assert_eq!(track_of(&e, ruler), None, "naming a ruler puts it on the ruler");
+        e.session_mut().edit.selected_tracks.clear();
+        let none = e.execute("markers.add", &json!({"at": 400})).unwrap()["number"].as_u64().unwrap();
+        assert_eq!(track_of(&e, none), None, "no selected track: the ruler");
+
+        e.execute("markers.edit", &json!({"number": n, "track": null, "ruler": 3})).unwrap();
+        assert_eq!(track_of(&e, n), None);
+        assert!(e.execute("markers.edit", &json!({"number": n, "ruler": 9})).is_err());
+        e.execute("markers.edit", &json!({"number": n, "track": snare.0})).unwrap();
+        assert_eq!(track_of(&e, n), Some(snare));
+
+        let before = e.session().markers.len();
+        let on_snare = e.session().markers.iter().filter(|m| m.track == Some(snare)).count();
+        e.execute("track.delete", &json!({"tracks": [snare.0]})).unwrap();
+        assert_eq!(e.session().markers.len(), before - on_snare, "the track's lane markers went with it");
+        e.undo();
+        assert_eq!(e.session().markers.len(), before, "undo brings them back");
     }
 
     #[test]
