@@ -99,7 +99,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit Memory Location",
             [],
             None,
-            "{number | id, name?, comments?, at?, color?: [r,g,b] | null, ruler?: 1..5, track?: id|name|null (null: back to the ruler), store?: [settings], forget?: [settings], window_config?: n} — settings as in markers.add",
+            "{number | id, name?, comments?, at?, end? (a selection's end), color?: [r,g,b] | null, ruler?: 1..5, track?: id|name|null (null: back to the ruler), store?: [settings], forget?: [settings], window_config?: n} — settings as in markers.add",
             always,
             edit_marker
         ),
@@ -416,7 +416,17 @@ fn delete_marker(e: &mut Engine, p: &Value) -> Result<Value> {
 fn edit_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     let i = marker_index(e, p, "markers.edit")?;
     let at = position_param(e, "markers.edit", p, "at")?;
+    let end = position_param(e, "markers.edit", p, "end")?;
     let color = color_param("markers.edit", p)?;
+    if let Some(end) = end {
+        let m = e.session().markers.get(i).ok_or_else(|| bad("markers.edit", "gone"))?;
+        if m.kind != MarkerKind::Selection {
+            return Err(bad("markers.edit", "`end` is for a stored selection"));
+        }
+        if end < at.unwrap_or(m.start).max(0) {
+            return Err(bad("markers.edit", "`end` is before the start"));
+        }
+    }
     // `track`: a track id or name puts it on that track's lane, null back on the ruler.
     let track = match p.get("track") {
         None => None,
@@ -451,7 +461,10 @@ fn edit_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     if let Some(a) = at {
         let len = m.end - m.start;
         m.start = a.max(0);
-        m.end = m.start + len;
+        m.end = m.start.saturating_add(len);
+    }
+    if let Some(b) = end {
+        m.end = b.max(m.start);
     }
     s.markers.sort_by_key(|m| m.start);
     Ok(json!({}))
@@ -651,6 +664,25 @@ mod tests {
         assert_eq!(e.session().markers.len(), before - on_snare, "the track's lane markers went with it");
         e.undo();
         assert_eq!(e.session().markers.len(), before, "undo brings them back");
+    }
+
+    #[test]
+    fn a_locations_place_can_be_typed_in_the_main_counters_format() {
+        let mut e = crate::Engine::default();
+        e.session_mut().edit.main_counter = soundcraft_time::TimeFormat::Samples;
+        let n = e.execute("markers.add", &json!({"kind": "selection", "start": 1_000, "end": 2_000})).unwrap()["number"].clone();
+        let m = |e: &crate::Engine| {
+            e.session().markers.iter().find(|m| m.kind == soundcraft_model::MarkerKind::Selection).map(|m| (m.start, m.end)).unwrap()
+        };
+        e.execute("markers.edit", &json!({"number": n, "at": "5000"})).unwrap();
+        assert_eq!(m(&e), (5_000, 6_000), "moving keeps the length");
+        e.execute("markers.edit", &json!({"number": n, "end": "9000"})).unwrap();
+        assert_eq!(m(&e), (5_000, 9_000));
+        assert!(e.execute("markers.edit", &json!({"number": n, "end": "100"})).is_err(), "before the start");
+        assert!(e.execute("markers.edit", &json!({"number": n, "at": "not a time"})).is_err());
+        let p = e.execute("markers.add", &json!({"at": 10})).unwrap()["number"].clone();
+        assert!(e.execute("markers.edit", &json!({"number": p, "end": 20})).is_err(), "a marker has no end");
+        assert_eq!(m(&e), (5_000, 9_000), "refused edits change nothing");
     }
 
     #[test]

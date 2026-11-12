@@ -67,6 +67,31 @@ use app::{automation_step_due, editor_changes, editor_states_due, failed_plugin_
 pub use services::Services;
 pub use state::{DragSource, MainWindow};
 
+/// Window ▸ Memory Locations' view: which optional columns show, and the sort. Names it doesn't
+/// know (from an older or hand-edited preferences file) are ignored.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct MemoryView {
+    /// Optional columns shown: `colour`, `location`, `end`, `length`, `type`, `where`, `stores`, `comments`.
+    pub columns: Vec<String>,
+    /// Sort column: `number`, `name`, `location`, `end`, `length`, `type` or `where`.
+    pub sort: String,
+    pub descending: bool,
+}
+
+impl Default for MemoryView {
+    fn default() -> Self {
+        let columns = ["colour", "location", "length", "type", "where", "stores", "comments"];
+        MemoryView { columns: columns.map(String::from).to_vec(), sort: "location".into(), descending: false }
+    }
+}
+
+impl MemoryView {
+    pub fn shows(&self, column: &str) -> bool {
+        self.columns.iter().any(|c| c == column)
+    }
+}
+
 /// UI state (serde, so agents can read and set it).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -98,6 +123,8 @@ pub struct UiState {
     pub edit_views: Vec<String>,
     /// How strongly Edit window tracks take on their colour, 0..1 (0: only the colour strip).
     pub track_tint: f32,
+    /// Window ▸ Memory Locations: the columns shown and the sort.
+    pub memory_view: MemoryView,
     /// Open plugin windows (track, slot).
     pub plugin_windows: Vec<(TrackId, usize)>,
     /// The send in the Send window (track, slot).
@@ -179,6 +206,7 @@ impl Default for UiState {
             mix_views: vec!["inserts_ae".into(), "sends_ae".into(), "io".into(), "color".into()],
             edit_views: vec!["color".into()],
             track_tint: 0.5,
+            memory_view: MemoryView::default(),
             plugin_windows: Vec::new(),
             send_window: None,
             audiosuite: None,

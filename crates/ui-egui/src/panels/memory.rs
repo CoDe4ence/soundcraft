@@ -101,7 +101,6 @@ fn colour_cell(app: &mut SoundApp, ui: &mut Ui, n: u32, color: Option<[u8; 3]>) 
 
 fn row(app: &mut SoundApp, ui: &mut Ui, m: &MemoryLocation) {
     let s = app.engine.session_arc();
-    let f = |x: i64| s.format_position(x, s.edit.main_counter);
     let n = m.number;
     if ui.button(n.to_string()).on_hover_text("Recall").clicked() {
         recall(app, n);
@@ -125,26 +124,113 @@ fn row(app: &mut SoundApp, ui: &mut Ui, m: &MemoryLocation) {
     if crate::widgets::close_button(ui, "Delete memory location").clicked() {
         let _ = app.run("markers.delete", json!({"number": n}));
     }
-    colour_cell(app, ui, n, m.color);
+    let view = app.ui.memory_view.clone();
+    if view.shows("colour") {
+        colour_cell(app, ui, n, m.color);
+    }
     text_cell(app, ui, n, "rename", &m.name, 110.0, "Name");
-    ui.label(egui::RichText::new(if m.kind == MarkerKind::None { String::new() } else { f(m.start) }).font(mono(11.0)));
-    ui.label(egui::RichText::new(if m.kind == MarkerKind::Selection { f(m.end - m.start) } else { String::new() }).font(mono(11.0)));
-    ui.label(kind_label(m.kind));
-    let place = match m.track {
-        Some(t) => s.track(t).map_or_else(|| "(gone)".to_string(), |t| t.name.clone()),
-        None => format!("Ruler {}", m.ruler.max(1)),
-    };
-    ui.label(place);
-    let has = stored(m);
-    let letters: String = SETTINGS.iter().zip(has).filter(|(_, on)| *on).map(|((_, _, l), _)| *l).collect();
-    let tip: Vec<&str> = SETTINGS.iter().zip(has).filter(|(_, on)| *on).map(|((_, label, _), _)| *label).collect();
-    ui.label(egui::RichText::new(letters).font(mono(11.0))).on_hover_text(if tip.is_empty() {
-        "No view settings stored".to_string()
-    } else {
-        tip.join(", ")
-    });
-    text_cell(app, ui, n, "comments", &m.comments, 140.0, "Comments");
+    for (column, _) in COLUMNS.iter().filter(|(c, _)| *c != "colour" && view.shows(c)) {
+        cell(app, ui, m, column, &s);
+    }
     ui.end_row();
+}
+
+/// The optional columns, in the order they show, with their titles.
+const COLUMNS: [(&str, &str); 8] = [
+    ("colour", "Colour"),
+    ("location", "Location"),
+    ("end", "End"),
+    ("length", "Length"),
+    ("type", "Type"),
+    ("where", "Where"),
+    ("stores", "Stores"),
+    ("comments", "Comments"),
+];
+
+/// The columns the list can be sorted by.
+const SORTABLE: [&str; 7] = ["number", "name", "location", "end", "length", "type", "where"];
+
+/// What a row sorts by in `column`: numbers first (a place, a length), then text.
+fn sort_key(s: &soundcraft_model::Session, m: &MemoryLocation, column: &str) -> (i64, String) {
+    let place = |x: i64| if m.kind == MarkerKind::None { -1 } else { x };
+    match column {
+        "number" => (i64::from(m.number), String::new()),
+        "name" => (0, m.name.to_lowercase()),
+        "end" => (if m.kind == MarkerKind::Selection { m.end } else { -1 }, String::new()),
+        "length" => (if m.kind == MarkerKind::Selection { m.end.saturating_sub(m.start) } else { -1 }, String::new()),
+        "type" => (
+            match m.kind {
+                MarkerKind::Marker => 0,
+                MarkerKind::Selection => 1,
+                MarkerKind::None => 2,
+            },
+            String::new(),
+        ),
+        "where" => match m.track {
+            None => (i64::from(m.ruler), String::new()),
+            Some(t) => (10, s.track(t).map(|t| t.name.to_lowercase()).unwrap_or_default()),
+        },
+        _ => (place(m.start), String::new()),
+    }
+}
+
+/// A column title: clicking a sortable one sorts by it, again reverses.
+fn header(app: &mut SoundApp, ui: &mut Ui, column: &str, title: &str) {
+    if !SORTABLE.contains(&column) {
+        ui.label(egui::RichText::new(title).strong());
+        return;
+    }
+    let v = &app.ui.memory_view;
+    let on = v.sort == column;
+    let text = match (on, v.descending) {
+        (true, false) => format!("{title} ▴"),
+        (true, true) => format!("{title} ▾"),
+        _ => title.to_string(),
+    };
+    if ui.selectable_label(on, egui::RichText::new(text).strong()).on_hover_text("Sort").clicked() {
+        sort_by(&mut app.ui.memory_view, column);
+    }
+}
+
+/// Sorts by `column`; sorting by the same column again reverses it.
+fn sort_by(v: &mut crate::MemoryView, column: &str) {
+    v.descending = v.sort == column && !v.descending;
+    v.sort = column.to_string();
+}
+
+/// One optional cell of a row. Location and a selection's End take a typed time, in the main
+/// counter's format.
+fn cell(app: &mut SoundApp, ui: &mut Ui, m: &MemoryLocation, column: &str, s: &soundcraft_model::Session) {
+    let f = |x: i64| s.format_position(x, s.edit.main_counter);
+    let n = m.number;
+    match column {
+        "location" if m.kind != MarkerKind::None => text_cell(app, ui, n, "at", &f(m.start), 90.0, "Location"),
+        "end" if m.kind == MarkerKind::Selection => text_cell(app, ui, n, "end", &f(m.end), 90.0, "End"),
+        "length" if m.kind == MarkerKind::Selection => {
+            ui.label(egui::RichText::new(f(m.end.saturating_sub(m.start))).font(mono(11.0)));
+        }
+        "type" => {
+            ui.label(kind_label(m.kind));
+        }
+        "where" => {
+            let place = match m.track {
+                Some(t) => s.track(t).map_or_else(|| "(gone)".to_string(), |t| t.name.clone()),
+                None => format!("Ruler {}", m.ruler.max(1)),
+            };
+            ui.label(place);
+        }
+        "stores" => {
+            let has = stored(m);
+            let letters: String = SETTINGS.iter().zip(has).filter(|(_, on)| *on).map(|((_, _, l), _)| *l).collect();
+            let tip: Vec<&str> = SETTINGS.iter().zip(has).filter(|(_, on)| *on).map(|((_, label, _), _)| *label).collect();
+            let tip = if tip.is_empty() { "No view settings stored".to_string() } else { tip.join(", ") };
+            ui.label(egui::RichText::new(letters).font(mono(11.0))).on_hover_text(tip);
+        }
+        "comments" => text_cell(app, ui, n, "comments", &m.comments, 140.0, "Comments"),
+        _ => {
+            ui.label("");
+        }
+    }
 }
 
 pub(crate) fn memory_locations(app: &mut SoundApp, ui: &mut Ui) {
@@ -179,6 +265,18 @@ pub(crate) fn memory_locations(app: &mut SoundApp, ui: &mut Ui) {
         if r.changed() {
             ui.ctx().data_mut(|d| d.insert_temp(find_id, find.clone()));
         }
+        ui.menu_button("Columns", |ui| {
+            for (column, title) in COLUMNS {
+                let mut on = app.ui.memory_view.shows(column);
+                if ui.checkbox(&mut on, title).changed() {
+                    let columns = &mut app.ui.memory_view.columns;
+                    columns.retain(|c| c != column);
+                    if on {
+                        columns.push(column.to_string());
+                    }
+                }
+            }
+        });
         ui.menu_button("Delete", |ui| {
             if ui.button("Delete All Memory Locations").clicked() {
                 if let Err(error) = app.run("markers.delete_all", json!({})) {
@@ -189,18 +287,31 @@ pub(crate) fn memory_locations(app: &mut SoundApp, ui: &mut Ui) {
         });
     });
     let needle = find.trim().to_lowercase();
-    let rows: Vec<MemoryLocation> = app
-        .engine
-        .session()
+    let s = app.engine.session_arc();
+    let mut rows: Vec<MemoryLocation> = s
         .markers
         .iter()
         .filter(|m| needle.is_empty() || m.name.to_lowercase().contains(&needle) || m.comments.to_lowercase().contains(&needle))
         .cloned()
         .collect();
+    let view = app.ui.memory_view.clone();
+    rows.sort_by(|a, b| {
+        let order = sort_key(&s, a, &view.sort).cmp(&sort_key(&s, b, &view.sort)).then(a.number.cmp(&b.number));
+        if view.descending { order.reverse() } else { order }
+    });
+    let shown: Vec<(&str, &str)> = COLUMNS.iter().copied().filter(|(c, _)| view.shows(c)).collect();
     egui::ScrollArea::both().show(ui, |ui| {
-        egui::Grid::new("mem_grid").striped(true).num_columns(11).show(ui, |ui| {
-            for h in ["#", "", "", "", "Name", "Location", "Length", "Type", "Where", "Stores", "Comments"] {
-                ui.label(egui::RichText::new(h).strong());
+        egui::Grid::new("mem_grid").striped(true).num_columns(5 + shown.len()).show(ui, |ui| {
+            header(app, ui, "number", "#");
+            for _ in 0..2 {
+                ui.label("");
+            }
+            if view.shows("colour") {
+                ui.label("");
+            }
+            header(app, ui, "name", "Name");
+            for (column, title) in shown.iter().filter(|(c, _)| *c != "colour") {
+                header(app, ui, column, title);
             }
             ui.end_row();
             for m in &rows {
@@ -390,6 +501,51 @@ mod tests {
             was: [false; 6],
             window_config: 0,
         }
+    }
+
+    #[test]
+    fn rows_sort_by_each_column_with_view_only_locations_first_by_place() {
+        let mut app = app();
+        let e = &mut app.engine;
+        e.execute("markers.delete_all", &json!({})).unwrap();
+        e.execute("markers.add", &json!({"name": "beta", "at": 5_000})).unwrap();
+        e.execute("markers.add", &json!({"name": "Alpha", "kind": "selection", "start": 9_000, "end": 9_500})).unwrap();
+        e.execute("markers.add", &json!({"name": "gamma", "kind": "none"})).unwrap();
+        e.execute("markers.add", &json!({"name": "delta", "at": 1_000, "track": "Kick"})).unwrap();
+        let s = app.engine.session_arc();
+        let order = |column: &str| {
+            let mut v: Vec<&MemoryLocation> = s.markers.iter().collect();
+            v.sort_by(|a, b| sort_key(&s, a, column).cmp(&sort_key(&s, b, column)).then(a.number.cmp(&b.number)));
+            v.iter().map(|m| m.name.as_str()).collect::<Vec<_>>()
+        };
+        assert_eq!(order("location"), ["gamma", "delta", "beta", "Alpha"]);
+        assert_eq!(order("name"), ["Alpha", "beta", "delta", "gamma"], "names sort without case");
+        assert_eq!(order("number"), ["beta", "Alpha", "gamma", "delta"]);
+        assert_eq!(order("length"), ["beta", "gamma", "delta", "Alpha"], "only a selection has a length");
+        assert_eq!(order("type"), ["beta", "delta", "Alpha", "gamma"]);
+        assert_eq!(order("where"), ["beta", "Alpha", "gamma", "delta"], "rulers before tracks");
+    }
+
+    #[test]
+    fn sorting_by_a_column_again_reverses_it() {
+        let mut v = crate::MemoryView::default();
+        assert_eq!((v.sort.as_str(), v.descending), ("location", false));
+        sort_by(&mut v, "name");
+        assert_eq!((v.sort.as_str(), v.descending), ("name", false));
+        sort_by(&mut v, "name");
+        assert!(v.descending);
+        sort_by(&mut v, "type");
+        assert_eq!((v.sort.as_str(), v.descending), ("type", false), "a new column starts ascending");
+    }
+
+    #[test]
+    fn a_saved_view_with_unknown_names_still_loads() {
+        let v: crate::MemoryView = serde_json::from_value(json!({"columns": ["comments", "sparkles"], "sort": "mood"})).unwrap();
+        assert!(v.shows("comments") && !v.shows("location"));
+        let s = app().engine.session_arc();
+        let m = s.markers.first().unwrap();
+        assert_eq!(sort_key(&s, m, "mood"), sort_key(&s, m, "location"), "an unknown sort falls back to location");
+        assert_eq!(crate::MemoryView::default().columns.len(), 7, "End is off by default");
     }
 
     #[test]
