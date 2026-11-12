@@ -86,6 +86,34 @@ pub fn format_length(start: Samples, len: Samples, fmt: TimeFormat, sr: SampleRa
     }
 }
 
+/// Parse a length typed into a counter or dialog, as [`format_length`] writes it, for a range
+/// starting at `start`: bars|beats|ticks count in the meter at `start`, timecode is a duration,
+/// and the other formats read as a position from zero. Never negative.
+pub fn parse_length(text: &str, start: Samples, fmt: TimeFormat, sr: SampleRate, map: &TempoMap, rate: FrameRate) -> Result<Samples, TimeError> {
+    let t = text.trim();
+    let err = || TimeError::Parse(t.to_string(), fmt.label());
+    let len = match fmt {
+        TimeFormat::BarsBeats => {
+            let parts: Vec<i64> =
+                t.split(['|', '.', ' ']).filter(|p| !p.is_empty()).map(str::parse::<i64>).collect::<Result<_, _>>().map_err(|_| err())?;
+            if parts.is_empty() || parts.len() > 3 || parts.iter().any(|p| *p < 0) {
+                return Err(err());
+            }
+            let t0 = map.samples_to_ticks(start, sr);
+            let m = map.meter_at_tick(t0);
+            let part = |i: usize| parts.get(i).copied().unwrap_or(0);
+            let ticks = part(0)
+                .saturating_mul(m.ticks_per_bar().max(1))
+                .saturating_add(part(1).saturating_mul(m.ticks_per_beat().max(1)))
+                .saturating_add(part(2));
+            map.tick_to_samples(t0.saturating_add(ticks), sr).saturating_sub(start)
+        }
+        TimeFormat::Timecode => Timecode::parse(t)?.to_samples(rate, sr),
+        other => parse_position(t, other, sr, map, rate, 0, 0)?,
+    };
+    if len < 0 { Err(err()) } else { Ok(len) }
+}
+
 /// Parse a position typed into a counter or dialog.
 pub fn parse_position(
     text: &str,
@@ -153,6 +181,33 @@ mod tests {
 
     fn ctx() -> (SampleRate, TempoMap, FrameRate) {
         (SampleRate::HZ_48000, TempoMap::default(), FrameRate::Fps30)
+    }
+
+    #[test]
+    fn a_typed_length_reads_back_what_format_length_wrote() {
+        let (sr, map, rate) = ctx();
+        let start = 48_000 * 3;
+        for fmt in TimeFormat::ALL {
+            for len in [0, 1_000, 48_000 * 7 + 123, 48_000 * 61] {
+                let text = format_length(start, len, fmt, sr, &map, rate);
+                let back = parse_length(&text, start, fmt, sr, &map, rate).unwrap_or(-1);
+                // Each format rounds to its own resolution (ms, a frame, a tick).
+                let tol = match fmt {
+                    TimeFormat::Samples => 0,
+                    TimeFormat::MinSecs => 48,
+                    _ => 48_000 / 24,
+                };
+                assert!((back - len).abs() <= tol, "{fmt:?}: {len} -> {text:?} -> {back}");
+            }
+        }
+        assert_eq!(
+            parse_length("2| 1| 000", 0, TimeFormat::BarsBeats, sr, &map, rate).unwrap(),
+            map.tick_to_samples(map.meter_at_tick(0).ticks_per_bar() * 2 + map.meter_at_tick(0).ticks_per_beat(), sr)
+        );
+        for bad in ["", "-1|0|0", "1|2|3|4", "x"] {
+            assert!(parse_length(bad, 0, TimeFormat::BarsBeats, sr, &map, rate).is_err(), "{bad}");
+        }
+        let _ = parse_length("9223372036854775807|9223372036854775807|9", 0, TimeFormat::BarsBeats, sr, &map, rate);
     }
 
     #[test]

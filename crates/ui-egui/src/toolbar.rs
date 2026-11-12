@@ -263,7 +263,10 @@ fn counters(app: &mut SoundApp, ui: &mut Ui) {
     for (i, (label, val)) in rows.iter().enumerate() {
         let y = r.min.y + 10.0 + i as f32 * 13.0;
         ui.painter().text(pos2(r.min.x + 214.0, y), Align2::RIGHT_CENTER, *label, regular(11.0), t.counter_label);
-        ui.painter().text(pos2(r.max.x - 8.0, y), Align2::RIGHT_CENTER, val, mono(11.0), t.counter_text);
+        let field = Rect::from_min_max(pos2(r.min.x + 220.0, y - 6.5), pos2(r.max.x - 4.0, y + 6.5));
+        if !selection_field(app, ui, i, field, val) {
+            ui.painter().text(pos2(r.max.x - 8.0, y), Align2::RIGHT_CENTER, val, mono(11.0), t.counter_text);
+        }
     }
     // Sub counter row.
     let y = r.max.y - 11.0;
@@ -277,6 +280,69 @@ fn counters(app: &mut SoundApp, ui: &mut Ui) {
     let st = if app.engine.is_dirty() { "modified" } else { "saved" };
     let dev = app.player.as_ref().map_or("no audio engine", |p| if p.silent { "silent clock" } else { "audio on" });
     ui.painter().text(pos2(r.max.x - 8.0, y), Align2::RIGHT_CENTER, format!("{st} · {dev}"), regular(10.0), t.text_dim);
+}
+
+/// The selection field being typed into: which row (Start, End, Length) and the text so far.
+fn typing_id() -> egui::Id {
+    egui::Id::unique("selection_field_typing")
+}
+
+/// Start, End or Length (`row` 0..=2) of the counter: a click opens it for typing in the main
+/// counter's format; Enter or leaving it applies, Escape cancels. Returns true while it is open.
+fn selection_field(app: &mut SoundApp, ui: &mut Ui, row: usize, field: Rect, shown: &str) -> bool {
+    let label = ["Start", "End", "Length"].get(row).copied().unwrap_or("Start");
+    let typing: Option<(usize, String)> = ui.data(|d| d.get_temp(typing_id()));
+    let Some((open, mut text)) = typing.filter(|(open, _)| *open == row) else {
+        let resp =
+            ui.interact(field, ui.scope_id().with(("selection_field", row)), Sense::click()).on_hover_text(format!("Type the selection's {label}"));
+        if resp.clicked() {
+            ui.data_mut(|d| d.insert_temp(typing_id(), (row, shown.to_string())));
+            ui.ctx().request_repaint();
+        }
+        return false;
+    };
+    let edit = egui::TextEdit::singleline(&mut text)
+        .font(egui::FontId::monospace(11.0))
+        .align(egui::Align2::RIGHT_CENTER)
+        .id(ui.scope_id().with(("selection_field_edit", open)));
+    let resp = crate::widgets::named_text_field(ui.put(field, edit), label);
+    if !resp.has_focus() && !resp.lost_focus() {
+        resp.request_focus();
+    }
+    let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+    if escape {
+        ui.data_mut(|d| d.remove::<(usize, String)>(typing_id()));
+    } else if enter || resp.lost_focus() {
+        ui.data_mut(|d| d.remove::<(usize, String)>(typing_id()));
+        if let Err(error) = type_selection(app, row, &text) {
+            app.ui.status = error;
+        }
+    } else {
+        ui.data_mut(|d| d.insert_temp(typing_id(), (row, text)));
+    }
+    true
+}
+
+/// Applies a typed Start (`row` 0), End (1) or Length (2) to the edit selection. A Start past the
+/// end, or an End before the start, makes an insertion point there.
+pub(crate) fn type_selection(app: &mut SoundApp, row: usize, text: &str) -> Result<(), String> {
+    let s = app.engine.session();
+    let (sel, fmt) = (s.edit.selection, s.edit.main_counter);
+    let range = match row {
+        0 => {
+            let at = s.parse_position(text, fmt).map_err(|e| e.to_string())?.max(0);
+            if at > sel.end { soundcraft_time::Range::point(at) } else { soundcraft_time::Range::new(at, sel.end) }
+        }
+        1 => {
+            let at = s.parse_position(text, fmt).map_err(|e| e.to_string())?.max(0);
+            if at < sel.start { soundcraft_time::Range::point(at) } else { soundcraft_time::Range::new(sel.start, at) }
+        }
+        _ => {
+            let len = soundcraft_time::parse_length(text, sel.start, fmt, s.sample_rate, &s.tempo, s.frame_rate).map_err(|e| e.to_string())?;
+            soundcraft_time::Range::new(sel.start, sel.start.saturating_add(len))
+        }
+    };
+    app.run("edit.select", json!({"start": range.start, "end": range.end})).map(|_| ())
 }
 
 /// A counter's time-format menu: picking a format runs `command` (`view.main_counter` or
@@ -709,6 +775,40 @@ mod tests {
     }
 
     /// Compact values use their corresponding counter formats and symbols.
+    #[test]
+    fn typed_start_end_and_length_set_the_edit_selection() {
+        use soundcraft_time::{Range, TimeFormat};
+        let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, crate::Services::default());
+        app.engine.session_mut().edit.main_counter = TimeFormat::Samples;
+        app.run("edit.select", serde_json::json!({"tracks": ["Kick"], "start": 1_000, "end": 5_000})).unwrap();
+        let sel = |app: &SoundApp| app.engine.session().edit.selection;
+        type_selection(&mut app, 0, "2000").unwrap();
+        assert_eq!(sel(&app), Range::new(2_000, 5_000), "Start keeps the end");
+        type_selection(&mut app, 1, "8000").unwrap();
+        assert_eq!(sel(&app), Range::new(2_000, 8_000), "End keeps the start");
+        type_selection(&mut app, 2, "500").unwrap();
+        assert_eq!(sel(&app), Range::new(2_000, 2_500), "Length from the start");
+        type_selection(&mut app, 0, "9000").unwrap();
+        assert_eq!(sel(&app), Range::point(9_000), "a Start past the end is an insertion point");
+        assert!(type_selection(&mut app, 1, "soon").is_err());
+        assert_eq!(sel(&app), Range::point(9_000), "a bad time changes nothing");
+        assert_eq!(app.engine.session().edit.selected_tracks.len(), 1, "the tracks stay");
+
+        app.engine.session_mut().edit.main_counter = TimeFormat::BarsBeats;
+        type_selection(&mut app, 0, "2| 1| 000").unwrap();
+        type_selection(&mut app, 2, "1| 0| 000").unwrap();
+        let s = app.engine.session();
+        let text = soundcraft_time::format_length(
+            s.edit.selection.start,
+            s.edit.selection.len(),
+            TimeFormat::BarsBeats,
+            s.sample_rate,
+            &s.tempo,
+            s.frame_rate,
+        );
+        assert_eq!(text, "1| 0| 000", "one bar");
+    }
+
     #[test]
     fn compact_grid_values_use_their_counter_formats() {
         let session = Session::default();

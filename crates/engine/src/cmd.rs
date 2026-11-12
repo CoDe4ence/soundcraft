@@ -29,6 +29,7 @@ mod options;
 mod plugin_state;
 mod query;
 pub(crate) mod sampler;
+mod selection_extend;
 mod setup_more;
 mod strip_silence;
 mod surround;
@@ -145,6 +146,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(options::specs());
         v.extend(transport::specs());
         v.extend(tab::specs());
+        v.extend(selection_extend::specs());
         v.extend(timeline_selection::specs());
         v.extend(query::specs());
         v.extend(health::specs());
