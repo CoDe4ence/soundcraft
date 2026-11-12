@@ -46,7 +46,7 @@ Legend: ✅ matches · 🟡 partial · ❌ missing.
 | Edit window: rulers, track headers, view columns, Clip List, Groups, Tracks list | ✅ | Track Pin (new in 2026.4) ✅ (`track.pin`); Tracks and Groups and the Clip List sit in full-height dock columns at the window's sides |
 | Mix window: strips, views (inserts, sends, I/O, comments, EQ curve, preamps, instruments, object) | ✅ | Narrow Mix ✅; Mix and Edit on screen at once (Window › Mix in Separate Window, its own native window) ✅; Delay Compensation view and HEAT missing |
 | MIDI Editor, Score Editor, Event List | 🟡 | Dock height bug fixed (#113); notation editing shallow |
-| Transport, Big Counter, Memory Locations, Automation, Video, Universe, Renderer, UI Customization | ✅ present | Memory Locations is an editor (New/Edit dialog, colour, comments, lane, stored view settings, find, delete all); columns can't be chosen or sorted ([memory-locations.md](memory-locations.md), G-23) |
+| Transport, Big Counter, Memory Locations, Automation, Video, Universe, Renderer, UI Customization | ✅ present | Memory Locations is an editor (New/Edit dialog, colour, comments, lane, stored view settings, find, delete all, chosen and sorted columns, typed times) ([memory-locations.md](memory-locations.md)) |
 | Workspace / sound browser with previews | ❌ | G-16 |
 | I/O Setup | 🟡 | Busses and paths; no hardware channel matrix (G-01) |
 | Preferences | 🟡 | Many settings stored, fewer honoured |
@@ -70,6 +70,7 @@ Legend: ✅ matches · 🟡 partial · ❌ missing.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | trivial | Windows row: Memory Locations columns can be chosen and sorted, times typed. Readiness estimate unchanged |
 | 2026-11-12 | minor | Windows row: the Memory Locations window is an editor; markers drag on rulers and track lanes. Readiness estimate unchanged |
 | 2026-11-12 | trivial | Windows row: what the Memory Locations window lacks, linking memory-locations.md. Readiness estimate unchanged |
 | 2026-10-25 | minor | Zoom Toggle row: Alt+Shift+E and Alt-click cancel Zoom Toggle and keep the view. Readiness estimate unchanged |

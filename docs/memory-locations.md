@@ -1,6 +1,6 @@
 # Memory locations
 
-> **Last reviewed:** 2026-11-12 · **Last updated:** 2026-11-12 · **Change:** major (the eight gaps closed; previously major: created from a code read) · **Target:** Avid Pro Tools Ultimate 2026.4.1
+> **Last reviewed:** 2026-11-12 · **Last updated:** 2026-11-12 · **Change:** minor (column choice and sorting, typed times; previously major: the eight gaps closed; previously major: created from a code read) · **Target:** Avid Pro Tools Ultimate 2026.4.1
 
 What SoundCraft's memory locations (markers, stored selections and view-only locations) do, read
 from the code. The eight gaps the first version of this page listed are closed; what remains is
@@ -30,7 +30,7 @@ All in the command registry, so menus, shortcuts, the CLI, the control channel a
 | Command | What it does |
 |---|---|
 | `markers.add` (Enter) | New location at the playhead while playing, else at the selection start; `kind: "selection"` stores the edit selection. Takes `name`, `at` or `start`/`end`, `ruler` 1–5 or `track`, `comments`, `color`, and `store: [...]` (the view settings to capture now) with `window_config: n` |
-| `markers.edit` | Rename, comments, move (`at`), colour, `ruler`, `track` (null: back to the ruler), `store` / `forget` view settings, `window_config` |
+| `markers.edit` | Rename, comments, move (`at`), a selection's `end`, colour, `ruler`, `track` (null: back to the ruler), `store` / `forget` view settings, `window_config` |
 | `markers.delete` | Delete one, by `number`, `id` or `name` |
 | `markers.delete_all` | Delete all of them, or one ruler's (`ruler`) or one track's (`track`) |
 | `markers.recall` (Period, number, Period) | A marker or selection goes to its place; the stored view settings are recalled too, only for tracks and groups that still exist, with stored numbers clamped. A `none` location recalls only its view settings. Returns the window configuration for the UI to recall |
@@ -62,7 +62,8 @@ Window ▸ Memory Locations (Cmd+5), a dockable panel (`crates/ui-egui/src/panel
 
 - **New…** opens a dialog: name, type, ruler or track lane, colour, comments, and which view settings to store (with a window configuration number). **Edit** opens it for an existing location: settings left ticked keep what they stored, new ticks capture now, unticked ones are forgotten. Each OK is one undo step.
 - **+ Marker** and **+ Selection** add one at once. **Find** filters by name or comments. **Delete ▸ Delete All Memory Locations**.
-- Rows: number (click to recall), Edit, delete, colour menu, editable name, location and length in the main counter's format, type, where it lives (ruler n or a track), the stored settings (Z P V H G W, named on hover) and editable comments.
+- Rows: number (click to recall), Edit, delete, then the name and the columns chosen in **Columns**: colour menu, Location and a selection's End (typed in the main counter's format), length, type, where it lives (ruler n or a track), the stored settings (Z P V H G W, named on hover) and comments. End is off by default.
+- Clicking a header sorts by number, name, location, end, length, type or where; clicking it again reverses. The columns and the sort are kept with the preferences.
 
 ## Keyboard recall
 
@@ -79,14 +80,13 @@ keyboard's, so there the entry starts only when nothing is selected to nudge.
 
 ## What remains
 
-- **Keyboard recall in Commands Keyboard Focus with a selection.** The numeric keypad can't be told apart from the main keyboard (an egui limit), so Period nudges there. Recall from the window, the rulers or the lanes instead.
-- **The window is one fixed set of columns.** Pro Tools lets you choose which columns show and sort by them; the panel scrolls sideways when it is narrow.
-- **A location's place can be typed only through `markers.edit` (`at`)**; the window and dialog show it but move it only by dragging.
+- **Keyboard recall in Commands Keyboard Focus with a selection.** The numeric keypad can't be told apart from the main keyboard: egui-winit drops the key's location when it translates keypad keys, so Period nudges there. Fixing it needs a change in the shared egui fork (keep the keypad location on key events). Until then, recall from the window, the rulers or the lanes.
 - **Fidelity is unmeasured**: these behaviours follow the features' names and observed behaviour, not a side-by-side comparison with Pro Tools.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-12 | minor | Window columns chosen and sorted, Location and End typed; only keypad recall in Commands Focus remains |
 | 2026-11-12 | major | The eight gaps closed: stored view settings, editor window, Markers Follow Edit, track-lane markers and display options, dragging, keyboard recall, imports, naming/copy/listing. What remains listed |
 | 2026-11-12 | major | Created from a code read: what memory locations hold and do, and eight ranked gaps |
