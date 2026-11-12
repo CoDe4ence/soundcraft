@@ -469,6 +469,7 @@ impl Engine {
         }
         match result {
             Ok(v) => {
+                cmd::sync_timeline(self, &before);
                 cmd::remember_selection(self, &before);
                 if spec.undoable && !Arc::ptr_eq(&before, &self.doc) {
                     self.push_undo(spec.label, before);

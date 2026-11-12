@@ -10,6 +10,7 @@ use crate::edit as ops;
 use crate::{Clipboard, Engine, Result, cmd};
 use serde_json::{Value, json};
 use soundcraft_model::{ClipId, EditMode, Fade, FadeShape, Session, TrackId};
+use soundcraft_time::MAX_POSITION;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -78,17 +79,8 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "edit.double_selection", "Double Edit", ["Edit", "Selection"], None, "{}", always, |e, _| scale_selection(e, 2.0)),
         cmd!(noundo "edit.extend_selection_up", "Extend Edit Up", ["Edit", "Selection"], Some("Ctrl+Shift+P"), "{}", has_tracks, |e, _| extend_tracks(e, -1)),
         cmd!(noundo "edit.extend_selection_down", "Extend Edit Down", ["Edit", "Selection"], Some("Ctrl+Shift+;"), "{}", has_tracks, |e, _| extend_tracks(e, 1)),
-        cmd!(noundo "edit.remove_selection_top", "Remove Edit from Top", ["Edit", "Selection"], None, "{}", has_tracks, |e, _| {
-            let s = e.session_mut();
-            if !s.edit.selected_tracks.is_empty() {
-                s.edit.selected_tracks.remove(0);
-            }
-            Ok(json!({}))
-        }),
-        cmd!(noundo "edit.remove_selection_bottom", "Remove Edit from Bottom", ["Edit", "Selection"], None, "{}", has_tracks, |e, _| {
-            e.session_mut().edit.selected_tracks.pop();
-            Ok(json!({}))
-        }),
+        cmd!(noundo "edit.remove_selection_top", "Remove Edit from Top", ["Edit", "Selection"], None, "{}", has_tracks, |e, _| remove_edge(e, true)),
+        cmd!(noundo "edit.remove_selection_bottom", "Remove Edit from Bottom", ["Edit", "Selection"], None, "{}", has_tracks, |e, _| remove_edge(e, false)),
         cmd!("edit.duplicate", "Duplicate", ["Edit"], Some("Cmd+D"), "{tracks?, start?, end?}", has_range, duplicate),
         cmd!("edit.repeat", "Repeat...", ["Edit"], Some("Alt+R"), "{count: n}", has_range, repeat),
         cmd!("edit.shift", "Shift...", ["Edit"], Some("Alt+H"), "{by: samples|{seconds}, later?: bool}", has_range, shift),
@@ -479,6 +471,25 @@ fn select_all(e: &mut Engine, _: &Value) -> Result<Value> {
     Ok(json!({"tracks": s.edit.selected_tracks.len(), "end": end}))
 }
 
+/// Puts `t` in the session's track order, once each.
+fn in_track_order(s: &Session, t: &mut Vec<TrackId>) {
+    let order: Vec<TrackId> = s.tracks.iter().map(|x| x.id).collect();
+    t.sort_by_key(|x| order.iter().position(|o| o == x).unwrap_or(usize::MAX));
+    t.dedup();
+}
+
+/// With Link Timeline and Edit Selection on, the timeline selection is the edit selection: run
+/// after every command, so none that moves the edit selection (or turns the link on) can leave
+/// the two apart. A command that changes neither leaves the session alone.
+pub(crate) fn sync_timeline(e: &mut Engine, before: &Session) {
+    let ed = &e.session().edit;
+    let touched = ed.selection != before.edit.selection || (ed.link_timeline_edit && !before.edit.link_timeline_edit);
+    if touched && ed.link_timeline_edit && ed.timeline_selection != ed.selection {
+        let s = e.session_mut();
+        s.edit.timeline_selection = s.edit.selection;
+    }
+}
+
 /// Adds the members of every active edit group that touches `t`, then puts `t` in track order.
 fn add_group_members(s: &Session, t: &mut Vec<TrackId>) {
     let extra: Vec<TrackId> =
@@ -528,6 +539,9 @@ fn select(e: &mut Engine, p: &Value) -> Result<Value> {
         if !exact {
             add_group_members(s, &mut t);
         }
+        // Kept in track order, whatever order they were given in: top and bottom mean the
+        // Edit window's (Remove Edit from Top, Extend Edit Up).
+        in_track_order(s, &mut t);
         ed.selected_tracks = t;
     }
     match (st, en) {
@@ -554,20 +568,37 @@ fn select(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
-fn shift_selection(e: &mut Engine, dir: i64) -> Result<Value> {
+/// Removes the top (or bottom) track of the edit selection, in the Edit window's order.
+fn remove_edge(e: &mut Engine, top: bool) -> Result<Value> {
+    let s = e.session();
+    let by_index = s.edit.selected_tracks.iter().filter_map(|t| Some((s.track_index(*t)?, *t)));
+    let edge = if top { by_index.min() } else { by_index.max() }.map(|(_, t)| t);
     let s = e.session_mut();
-    let len = s.edit.selection.len().max(1);
-    s.edit.selection = s.edit.selection.shifted(dir * len);
-    if s.edit.selection.start < 0 {
-        s.edit.selection = s.edit.selection.shifted(-s.edit.selection.start);
+    if let Some(t) = edge {
+        s.edit.selected_tracks.retain(|x| *x != t);
     }
-    Ok(json!({"selection": s.edit.selection}))
+    Ok(json!({"tracks": s.edit.selected_tracks}))
 }
 
+/// Move Edit Left/Right: the selection moves by its own length, stopping at the session's start
+/// and end. An insertion point has no length, so it stays.
+fn shift_selection(e: &mut Engine, dir: i64) -> Result<Value> {
+    let s = e.session_mut();
+    let sel = s.edit.selection;
+    if sel.is_empty() {
+        return Ok(json!({"selection": sel, "moved": false}));
+    }
+    let len = sel.len();
+    let start = sel.start.saturating_add(dir.saturating_mul(len)).clamp(0, MAX_POSITION.saturating_sub(len).max(0));
+    s.edit.selection = soundcraft_time::Range::new(start, start.saturating_add(len));
+    Ok(json!({"selection": s.edit.selection, "moved": s.edit.selection != sel}))
+}
+
+/// Halve/Double Edit: the selection's length times `f`, from its start, within the session's end.
 fn scale_selection(e: &mut Engine, f: f64) -> Result<Value> {
     let s = e.session_mut();
     let len = soundcraft_time::to_samples(s.edit.selection.len() as f64 * f);
-    s.edit.selection.end = s.edit.selection.start.saturating_add(len);
+    s.edit.selection.end = s.edit.selection.start.saturating_add(len).min(MAX_POSITION).max(s.edit.selection.start);
     Ok(json!({"selection": s.edit.selection}))
 }
 
@@ -1060,6 +1091,73 @@ fn consolidate(e: &mut Engine, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(e: &crate::Engine) -> Vec<String> {
+        e.session().edit.selected_tracks.iter().map(|t| e.session().track(*t).unwrap().name.clone()).collect()
+    }
+
+    #[test]
+    fn selected_tracks_keep_track_order_so_top_and_bottom_mean_the_edit_windows() {
+        let mut e = crate::demo::demo_engine();
+        e.execute("edit.select", &json!({"tracks": ["Bass", "Snare", "Kick"], "exact": true, "start": 0, "end": 10})).unwrap();
+        assert_eq!(names(&e), ["Kick", "Snare", "Bass"]);
+        e.execute("edit.remove_selection_top", &json!({})).unwrap();
+        assert_eq!(names(&e), ["Snare", "Bass"], "Kick is the top track");
+        e.execute("edit.remove_selection_bottom", &json!({})).unwrap();
+        assert_eq!(names(&e), ["Snare"]);
+        e.execute("edit.select", &json!({"tracks": ["Snare", "Snare"], "exact": true})).unwrap();
+        assert_eq!(names(&e), ["Snare"], "once each");
+    }
+
+    #[test]
+    fn move_edit_moves_a_range_by_its_length_and_leaves_an_insertion_point() {
+        let mut e = crate::demo::demo_engine();
+        e.execute("edit.select", &json!({"tracks": ["Kick"], "start": 5_000})).unwrap();
+        let r = e.execute("edit.move_selection_right", &json!({})).unwrap();
+        assert_eq!((e.session().edit.selection, r["moved"].as_bool()), (soundcraft_time::Range::point(5_000), Some(false)));
+        e.execute("edit.select", &json!({"tracks": ["Kick"], "start": 1_000, "end": 3_000})).unwrap();
+        e.execute("edit.move_selection_right", &json!({})).unwrap();
+        assert_eq!(e.session().edit.selection, soundcraft_time::Range::new(3_000, 5_000));
+        for _ in 0..3 {
+            e.execute("edit.move_selection_left", &json!({})).unwrap();
+        }
+        assert_eq!(e.session().edit.selection, soundcraft_time::Range::new(0, 2_000), "stops at the start");
+        e.execute("edit.select", &json!({"start": MAX_POSITION - 10, "end": MAX_POSITION})).unwrap();
+        e.execute("edit.move_selection_right", &json!({})).unwrap();
+        assert_eq!(e.session().edit.selection.end, MAX_POSITION, "and at the end");
+    }
+
+    #[test]
+    fn double_edit_stays_within_the_session_limit() {
+        let mut e = crate::demo::demo_engine();
+        e.execute("edit.select", &json!({"start": 0, "end": 1i64 << 39})).unwrap();
+        for _ in 0..4 {
+            e.execute("edit.double_selection", &json!({})).unwrap();
+        }
+        assert_eq!(e.session().edit.selection, soundcraft_time::Range::new(0, MAX_POSITION));
+        e.execute("edit.halve_selection", &json!({})).unwrap();
+        assert_eq!(e.session().edit.selection.len(), MAX_POSITION / 2);
+    }
+
+    #[test]
+    fn with_the_link_on_every_command_keeps_the_timeline_selection_with_the_edit_selection() {
+        let mut e = crate::demo::demo_engine();
+        assert!(e.session().edit.link_timeline_edit);
+        e.execute("edit.select", &json!({"tracks": ["Kick"], "start": 1_000, "end": 2_000})).unwrap();
+        for cmd in ["edit.move_selection_right", "edit.double_selection", "edit.select_all", "edit.restore_last_selection"] {
+            e.execute(cmd, &json!({})).unwrap();
+            assert_eq!(e.session().edit.timeline_selection, e.session().edit.selection, "{cmd}");
+        }
+        e.execute("markers.recall", &json!({"number": e.session().markers[0].number})).unwrap();
+        assert_eq!(e.session().edit.timeline_selection, e.session().edit.selection, "markers.recall");
+
+        // Unlinked, the timeline selection stays where it was.
+        e.execute("options.link_timeline_edit", &json!({"value": false})).unwrap();
+        let timeline = e.session().edit.timeline_selection;
+        e.execute("edit.move_selection_right", &json!({})).unwrap();
+        e.execute("edit.select", &json!({"start": 50, "end": 60})).unwrap();
+        assert_eq!(e.session().edit.timeline_selection, timeline);
+    }
     use soundcraft_model::{ChannelFormat, Clip, ClipContent, TrackId, TrackKind};
 
     #[test]
