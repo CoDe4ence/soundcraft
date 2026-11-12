@@ -68,13 +68,21 @@ pub fn specs() -> Vec<CommandSpec> {
             always,
             import_audio
         ),
-        cmd!("file.import_midi", "MIDI...", ["File", "Import"], Some("Cmd+Alt+I"), "{path, at?}", always, |e, p| {
-            let path = str_param(p, "path").ok_or_else(|| bad("file.import_midi", "`path` required"))?.to_string();
-            let at = position_param(e, "file.import_midi", p, "at")?.unwrap_or(0);
-            let bytes = crate::io::read_file(&path)?;
-            let tracks = crate::io::import_midi_bytes(e, &bytes, at, bool_or(p, "tempo_map", true))?;
-            Ok(json!({"tracks": tracks}))
-        }),
+        cmd!(
+            "file.import_midi",
+            "MIDI...",
+            ["File", "Import"],
+            Some("Cmd+Alt+I"),
+            "{path, at?, tempo_map?: true, markers?: true (the file's markers become memory locations)}",
+            always,
+            |e, p| {
+                let path = str_param(p, "path").ok_or_else(|| bad("file.import_midi", "`path` required"))?.to_string();
+                let at = position_param(e, "file.import_midi", p, "at")?.unwrap_or(0);
+                let bytes = crate::io::read_file(&path)?;
+                let tracks = crate::io::import_midi_bytes(e, &bytes, at, bool_or(p, "tempo_map", true), bool_or(p, "markers", true))?;
+                Ok(json!({"tracks": tracks}))
+            }
+        ),
         cmd!(
             "file.import_video",
             "Video...",

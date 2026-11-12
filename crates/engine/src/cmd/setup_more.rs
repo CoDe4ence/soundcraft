@@ -1,6 +1,6 @@
 //! More Options toggles, the Setup menu (hardware, playback engine, I/O, timecode, click,
 //! shortcuts, MIDI setup) and File › Import › Session Data.
-use super::{CommandSpec, always, bad, command_specs, i64_or, str_param, track_param, tracks_param};
+use super::{CommandSpec, always, bad, bool_or, command_specs, i64_or, str_param, track_param, tracks_param};
 
 use super::more_util::{set_text, store_value, text, toggle_flag, values_with_prefix};
 use crate::{Engine, EngineError, Result, cmd};
@@ -131,7 +131,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Session Data...",
             ["File", "Import"],
             Some("Alt+Shift+I"),
-            "{path, tracks?: [names]} — imports tracks (clips, playlists, mixer, automation, audio) from another session",
+            "{path, tracks?: [names], markers?: false} — imports tracks (clips, playlists, mixer, automation, audio) from another session; `markers` also brings its memory locations",
             always,
             import_session_data
         ),
@@ -530,8 +530,12 @@ fn import_session_data(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut out = Vec::new();
     // The donor's Auto Rename schemes come along under new keys, shared as they were.
     let mut names: std::collections::BTreeMap<u64, u64> = Default::default();
+    // The donor's track ids, for the track-lane markers that follow their tracks.
+    let mut track_map: std::collections::BTreeMap<TrackId, TrackId> = Default::default();
     for mut tr in picked {
+        let donor_id = tr.id;
         tr.id = TrackId(s.alloc());
+        track_map.insert(donor_id, tr.id);
         tr.name = s.unique_track_name(&tr.name);
         tr.folder = None;
         tr.mixer.vca = None;
@@ -574,7 +578,34 @@ fn import_session_data(e: &mut Engine, p: &Value) -> Result<Value> {
         s.tracks.insert(pos, tr);
     }
     s.edit.selected_tracks = out.clone();
-    Ok(json!({"tracks": out, "sources": map.len(), "missing": missing}))
+    let markers = if bool_or(p, "markers", false) { import_markers(s, &other, &track_map) } else { 0 };
+    Ok(json!({"tracks": out, "sources": map.len(), "missing": missing, "markers": markers}))
+}
+
+/// Adds `other`'s memory locations to `s` with new numbers, skipping ones `s` already has (same
+/// place, name, kind and lane). A track-lane marker follows its track when that track came along
+/// (`track_map`) and is left out otherwise. Returns how many were added.
+fn import_markers(s: &mut Session, other: &Session, track_map: &std::collections::BTreeMap<TrackId, TrackId>) -> usize {
+    let mut added = 0;
+    for m in &other.markers {
+        let track = match m.track {
+            Some(t) => match track_map.get(&t) {
+                Some(new) => Some(*new),
+                None => continue,
+            },
+            None => None,
+        };
+        if s.markers.iter().any(|x| x.start == m.start && x.name == m.name && x.kind == m.kind && x.ruler == m.ruler && x.track == track) {
+            continue;
+        }
+        let id = s.add_marker(&m.name, m.kind, m.start.max(0), m.end.max(m.start).max(0));
+        if let Some(x) = s.markers.iter_mut().find(|x| x.id == id) {
+            let number = x.number;
+            *x = soundcraft_model::MemoryLocation { id, number, track, start: x.start, end: x.end, ..m.clone() };
+        }
+        added += 1;
+    }
+    added
 }
 
 #[cfg(test)]
@@ -729,6 +760,53 @@ mod tests {
         assert!(e.session().pool.get(src).is_some());
         assert_eq!(e.session().track_by_name("Keys").unwrap().clips().len(), 1);
         assert!(e.execute("file.import_session_data", &json!({"path": path, "tracks": ["Nope"]})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_session_data_brings_memory_locations_when_asked() {
+        let dir = std::env::temp_dir().join(format!("sc-import-markers-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("donor.scraft").to_string_lossy().into_owned();
+        let mut donor = crate::demo::demo_engine();
+        donor.execute("markers.add", &json!({"name": "Bridge", "kind": "selection", "start": 96_000, "end": 192_000, "ruler": 3})).unwrap();
+        donor.execute("markers.edit", &json!({"name": "Bridge", "comments": "double it", "color": [10, 20, 30]})).unwrap();
+        let kick = donor.session().track_by_name("Kick").unwrap().id;
+        let keys = donor.session().track_by_name("Keys").unwrap().id;
+        let on_kick = donor.session_mut().add_marker("Kick hit", soundcraft_model::MarkerKind::Marker, 1_000, 1_000);
+        let on_keys = donor.session_mut().add_marker("Keys hit", soundcraft_model::MarkerKind::Marker, 2_000, 2_000);
+        for (m, t) in [(on_kick, kick), (on_keys, keys)] {
+            donor.session_mut().markers.iter_mut().find(|x| x.id == m).unwrap().track = Some(t);
+        }
+        let ruler_markers = donor.session().markers.iter().filter(|m| m.track.is_none()).count();
+        crate::io::save_session(&mut donor, &path).unwrap();
+
+        // Off by default: tracks only, as before.
+        let mut e = Engine::default();
+        let r = e.execute("file.import_session_data", &json!({"path": path, "tracks": ["Kick"]})).unwrap();
+        assert_eq!((r["markers"].as_u64(), e.session().markers.len()), (Some(0), 0));
+
+        let mut e = Engine::default();
+        e.execute("markers.add", &json!({"name": "Mine", "at": 5})).unwrap();
+        let r = e.execute("file.import_session_data", &json!({"path": path, "tracks": ["Kick"], "markers": true})).unwrap();
+        assert_eq!(r["markers"].as_u64(), Some(ruler_markers as u64 + 1), "ruler markers, plus Kick's lane marker; Keys' stays behind");
+        let s = e.session();
+        let bridge = s.markers.iter().find(|m| m.name == "Bridge").unwrap();
+        assert_eq!(
+            (bridge.kind, bridge.end, bridge.ruler, bridge.comments.as_str(), bridge.color),
+            (soundcraft_model::MarkerKind::Selection, 192_000, 3, "double it", Some([10, 20, 30]))
+        );
+        let new_kick = s.track_by_name("Kick").unwrap().id;
+        assert_eq!(s.markers.iter().find(|m| m.name == "Kick hit").and_then(|m| m.track), Some(new_kick));
+        assert!(!s.markers.iter().any(|m| m.name == "Keys hit"));
+        let mut numbers: Vec<u32> = s.markers.iter().map(|m| m.number).collect();
+        numbers.sort_unstable();
+        numbers.dedup();
+        assert_eq!(numbers.len(), s.markers.len(), "imported locations get numbers of their own");
+
+        // Importing again adds no second copy.
+        let r = e.execute("file.import_session_data", &json!({"path": path, "tracks": ["Kick"], "markers": true})).unwrap();
+        assert_eq!(r["markers"].as_u64(), Some(1), "only the new Kick track's lane marker");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -6,9 +6,12 @@ pub(super) const MAX_MIDI_METERS: usize = 10_000;
 pub(super) const MAX_MIDI_TEMPOS: usize = 10_000;
 /// Most synth tracks a MIDI file may create in the session.
 pub(super) const MAX_MIDI_TRACKS: usize = 512;
+/// Most Marker meta events a MIDI file may add as memory locations.
+pub(super) const MAX_MIDI_MARKERS: usize = 10_000;
 
-/// Import a Standard MIDI File as MIDI tracks (one per SMF track).
-pub fn import_midi_bytes(e: &mut Engine, bytes: &[u8], at: Samples, tempo_map: bool) -> Result<Vec<TrackId>> {
+/// Import a Standard MIDI File as MIDI tracks (one per SMF track). With `markers`, the file's
+/// Marker meta events become markers, placed like the notes (from `at`).
+pub fn import_midi_bytes(e: &mut Engine, bytes: &[u8], at: Samples, tempo_map: bool, markers: bool) -> Result<Vec<TrackId>> {
     let smf = soundcraft_midi::read_smf(bytes).map_err(|err| EngineError::Io(err.to_string()))?;
     if tempo_map {
         // Each meter is placed by walking the ones before it.
@@ -18,6 +21,9 @@ pub fn import_midi_bytes(e: &mut Engine, bytes: &[u8], at: Samples, tempo_map: b
         if smf.tempos.len() > MAX_MIDI_TEMPOS {
             return Err(EngineError::Io(format!("MIDI file: more than {MAX_MIDI_TEMPOS} tempo changes")));
         }
+    }
+    if markers && smf.markers.len() > MAX_MIDI_MARKERS {
+        return Err(EngineError::Io(format!("MIDI file: more than {MAX_MIDI_MARKERS} markers")));
     }
     let tracks_to_import = smf.tracks.iter().filter(|tr| !tr.sequence.notes.is_empty() || !tr.sequence.ctrls.is_empty()).count();
     if tracks_to_import > MAX_MIDI_TRACKS {
@@ -58,6 +64,17 @@ pub fn import_midi_bytes(e: &mut Engine, bytes: &[u8], at: Samples, tempo_map: b
         let cid = s.new_clip_id();
         crate::edit::place_clip(s, id, Clip::midi(cid, name, at, len.max(1), tr.sequence.clone()));
         out.push(id);
+    }
+    if markers {
+        for (tick, text) in &smf.markers {
+            let start = s.tempo.tick_to_samples(base_tick.saturating_add(*tick), s.sample_rate).max(0);
+            let mut name = if text.trim().is_empty() { "Marker".to_string() } else { text.trim().to_string() };
+            soundcraft_model::truncate_chars(&mut name, soundcraft_model::MAX_NAME_CHARS);
+            // Importing the same file twice adds its markers once.
+            if !s.markers.iter().any(|m| m.start == start && m.name == name) {
+                s.add_marker(&name, soundcraft_model::MarkerKind::Marker, start, start);
+            }
+        }
     }
     Ok(out)
 }

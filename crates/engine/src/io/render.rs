@@ -1,6 +1,6 @@
 use super::import::add_source;
 #[cfg(test)]
-use super::midi::{MAX_MIDI_METERS, MAX_MIDI_TEMPOS, MAX_MIDI_TRACKS, import_midi_bytes};
+use super::midi::{MAX_MIDI_MARKERS, MAX_MIDI_METERS, MAX_MIDI_TEMPOS, MAX_MIDI_TRACKS, import_midi_bytes};
 use super::{AudioBuffer, Clip, ClipContent, Engine, EngineError, FileFormat, Range, Result, Samples, Session, TrackId, TrackKind};
 
 /// Consolidate `r` on a track into one new clip backed by a rendered source. The clip covers the
@@ -150,7 +150,7 @@ mod name_tests {
         let sequence = soundcraft_midi::Sequence { notes: vec![note], ..Default::default() };
         let smf = soundcraft_midi::Smf { tracks: vec![soundcraft_midi::SmfTrack { name: "n".repeat(1_000_000), sequence }], ..Default::default() };
         let mut e = Engine::default();
-        let ids = import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf).unwrap(), 0, false).unwrap();
+        let ids = import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf).unwrap(), 0, false, true).unwrap();
         let track = e.session().track(ids[0]).unwrap();
         assert_eq!((track.name.len(), track.clips()[0].name.len()), (soundcraft_model::MAX_NAME_CHARS, soundcraft_model::MAX_NAME_CHARS));
     }
@@ -165,7 +165,7 @@ mod name_tests {
         let sequence = soundcraft_midi::Sequence { ctrls: ctrls.clone(), ..Default::default() };
         let smf = soundcraft_midi::Smf { tracks: vec![soundcraft_midi::SmfTrack { name: "Vol".into(), sequence }], ..Default::default() };
         let mut e = Engine::default();
-        let ids = import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf).unwrap(), 0, false).unwrap();
+        let ids = import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf).unwrap(), 0, false, true).unwrap();
         assert_eq!(ids.len(), 1);
         let track = e.session().track(ids[0]).unwrap();
         assert_eq!(track.instrument.as_ref().map(|i| i.plugin.as_str()), Some("subtractive_synth"));
@@ -182,7 +182,7 @@ mod name_tests {
         let held = soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: (1 << 28) - 1 };
         let sequence = soundcraft_midi::Sequence { notes: vec![held], ..Default::default() };
         let smf = soundcraft_midi::Smf { tracks: vec![soundcraft_midi::SmfTrack { name: String::new(), sequence }], ..Default::default() };
-        let err = import_midi_bytes(&mut Engine::default(), &soundcraft_midi::write_smf(&smf).unwrap(), 0, false).unwrap_err();
+        let err = import_midi_bytes(&mut Engine::default(), &soundcraft_midi::write_smf(&smf).unwrap(), 0, false, true).unwrap_err();
         assert!(err.to_string().contains("longer than 24 hours"), "{err}");
     }
 
@@ -192,11 +192,47 @@ mod name_tests {
         let sequence = soundcraft_midi::Sequence { notes: vec![note], ..Default::default() };
         let meters = (0..=MAX_MIDI_METERS as i64).map(|bar| (bar * 3840, 4, 4)).collect();
         let smf = soundcraft_midi::Smf { tracks: vec![soundcraft_midi::SmfTrack { name: String::new(), sequence }], meters, ..Default::default() };
-        let err = import_midi_bytes(&mut Engine::default(), &soundcraft_midi::write_smf(&smf).unwrap(), 0, true).unwrap_err();
+        let err = import_midi_bytes(&mut Engine::default(), &soundcraft_midi::write_smf(&smf).unwrap(), 0, true, true).unwrap_err();
         assert!(err.to_string().contains("meter changes"), "{err}");
     }
 
     /// A MIDI file with more tempo changes than MAX_MIDI_TEMPOS is refused without mutating the session.
+    fn smf_with_markers(markers: Vec<(i64, String)>) -> Vec<u8> {
+        let note = soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 };
+        let sequence = soundcraft_midi::Sequence { notes: vec![note], ..Default::default() };
+        let smf = soundcraft_midi::Smf { tracks: vec![soundcraft_midi::SmfTrack { name: "Keys".into(), sequence }], markers, ..Default::default() };
+        soundcraft_midi::write_smf(&smf).unwrap()
+    }
+
+    #[test]
+    fn midi_markers_become_markers_placed_like_the_notes() {
+        let bytes = smf_with_markers(vec![(0, "Intro".into()), (3840, "  Verse ".into()), (7680, String::new())]);
+        let mut e = Engine::default();
+        let at = 48_000;
+        import_midi_bytes(&mut e, &bytes, at, false, true).unwrap();
+        let s = e.session();
+        let got: Vec<(i64, &str)> = s.markers.iter().map(|m| (m.start, m.name.as_str())).collect();
+        let place = |tick: i64| s.tempo.tick_to_samples(s.tempo.samples_to_ticks(at, s.sample_rate) + tick, s.sample_rate);
+        assert_eq!(got, vec![(at, "Intro"), (place(3840), "Verse"), (place(7680), "Marker")]);
+
+        // The same file again adds no second copy; `markers: false` adds none at all.
+        import_midi_bytes(&mut e, &bytes, at, false, true).unwrap();
+        assert_eq!(e.session().markers.len(), 3);
+        let mut none = Engine::default();
+        import_midi_bytes(&mut none, &bytes, at, false, false).unwrap();
+        assert!(none.session().markers.is_empty());
+    }
+
+    #[test]
+    fn midi_with_more_markers_than_a_session_needs_is_refused() {
+        let bytes = smf_with_markers((0..=MAX_MIDI_MARKERS as i64).map(|i| (i, format!("m{i}"))).collect());
+        let mut e = Engine::default();
+        let err = import_midi_bytes(&mut e, &bytes, 0, false, true).unwrap_err();
+        assert!(err.to_string().contains("markers"), "{err}");
+        assert!(e.session().markers.is_empty() && e.session().tracks.is_empty(), "nothing is imported");
+        import_midi_bytes(&mut e, &bytes, 0, false, false).unwrap();
+    }
+
     #[test]
     fn midi_with_more_tempo_changes_than_performances_have_is_refused() {
         let note = soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 };
@@ -207,10 +243,10 @@ mod name_tests {
             ..Default::default()
         };
         let mut e = Engine::default();
-        let err = import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf(MAX_MIDI_TEMPOS + 1)).unwrap(), 0, true).unwrap_err();
+        let err = import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf(MAX_MIDI_TEMPOS + 1)).unwrap(), 0, true, true).unwrap_err();
         assert!(err.to_string().contains("tempo changes"), "{err}");
         assert_eq!((e.session().tempo.tempos().len(), e.session().tracks.len()), (1, 0), "nothing is imported");
-        import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf(MAX_MIDI_TEMPOS)).unwrap(), 0, true).unwrap();
+        import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf(MAX_MIDI_TEMPOS)).unwrap(), 0, true, true).unwrap();
         assert_eq!(e.session().tempo.tempos().len(), MAX_MIDI_TEMPOS);
     }
 
@@ -224,10 +260,10 @@ mod name_tests {
             ..Default::default()
         };
         let mut e = Engine::default();
-        let err = import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf(MAX_MIDI_TRACKS + 1)).unwrap(), 0, false).unwrap_err();
+        let err = import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf(MAX_MIDI_TRACKS + 1)).unwrap(), 0, false, true).unwrap_err();
         assert!(err.to_string().contains("tracks"), "{err}");
         assert_eq!(e.session().tracks.len(), 0, "no tracks imported");
-        import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf(MAX_MIDI_TRACKS)).unwrap(), 0, false).unwrap();
+        import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf(MAX_MIDI_TRACKS)).unwrap(), 0, false, true).unwrap();
         assert_eq!(e.session().tracks.len(), MAX_MIDI_TRACKS);
     }
 
@@ -242,7 +278,7 @@ mod name_tests {
             ..Default::default()
         };
         let mut e = Engine::default();
-        import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf).unwrap(), 0, true).unwrap();
+        import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf).unwrap(), 0, true, true).unwrap();
         let tempos = e.session().tempo.tempos();
         assert_eq!(tempos.len(), 3);
         assert!((tempos[0].bpm - 120.0).abs() < 1e-3);
@@ -263,7 +299,7 @@ mod name_tests {
         let mut e = Engine::default();
         e.session_mut().tempo.set_tempo(960, 80.0).unwrap();
         assert_eq!(e.session().tempo.tempo_at_tick(960), 80.0);
-        import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf).unwrap(), 0, true).unwrap();
+        import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf).unwrap(), 0, true, true).unwrap();
         assert_eq!(e.session().tempo.tempo_at_tick(960), 120.0);
     }
 

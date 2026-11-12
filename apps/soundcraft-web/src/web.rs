@@ -181,7 +181,7 @@ impl WebShell {
             }
             Purpose::Midi => {
                 let before = e.session_arc();
-                io::import_midi_bytes(e, &bytes, at, true).map(|_| {
+                io::import_midi_bytes(e, &bytes, at, true, true).map(|_| {
                     e.push_undo("Import MIDI", before);
                     format!("Imported {name}")
                 })
