@@ -1592,6 +1592,35 @@ fn alt_click_on_a_marker_deletes_it() {
     assert!(!h.state().engine.session().markers.iter().any(|m| m.name == "Alt-delete me"));
 }
 
+/// The demo's Kick track, its row index, and a point in the gap before its first clip.
+fn kick_gap(h: &Harness<SoundApp>) -> (TrackId, usize, Pos2, Range) {
+    let s = h.state().engine.session_arc();
+    let kick = s.track_by_name("Kick").unwrap().id;
+    let i = row_ids(h).iter().position(|t| *t == kick).unwrap();
+    let first = s.track(kick).unwrap().clips().iter().map(|c| c.start).min().unwrap();
+    let at = pos2(x_of(&s, timeline(h), first / 2), row(h, i).center().y);
+    (kick, i, at, Range::new(0, first))
+}
+
+#[test]
+fn double_click_in_a_gap_selects_it_and_triple_click_the_whole_track() {
+    let mut engine = soundcraft_engine::demo::demo_engine();
+    engine.session_mut().edit.tool = soundcraft_model::Tool::Selector;
+    let mut h = harness_with(engine);
+    let (kick, _, at, gap) = kick_gap(&h);
+    click(&mut h, at);
+    click(&mut h, at);
+    let ed = h.state().engine.session().edit.clone();
+    assert_eq!((ed.selection, ed.selected_tracks.clone()), (gap, vec![kick]), "the gap before the first clip");
+    h.run_steps(30);
+
+    click(&mut h, at);
+    click(&mut h, at);
+    click(&mut h, at);
+    let end = h.state().engine.session().content_end();
+    assert_eq!(h.state().engine.session().edit.selection, Range::new(0, end), "the whole track");
+}
+
 #[test]
 fn dragging_a_timebase_ruler_selects_and_playback_plays_the_timeline_selection() {
     let mut engine = soundcraft_engine::demo::demo_engine();

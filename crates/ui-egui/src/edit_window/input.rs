@@ -397,16 +397,26 @@ fn lane_click(app: &mut SoundApp, ui: &mut Ui, c: &LaneCtx<'_>, resp: &egui::Res
             _ => {}
         }
     }
-    if resp.double_clicked()
-        && curve_handle.is_none()
-        && point_hit.is_none()
-        && eff != Tool::Pencil
+    let selecting = curve_handle.is_none() && point_hit.is_none() && eff != Tool::Pencil;
+    if resp.triple_clicked() && selecting && eff != Tool::Grabber {
+        // Triple-click: the whole track, from the session start to its end.
+        let _ = app.run("edit.select", json!({"tracks": [track.id.0], "start": 0, "end": s.content_end()}));
+    } else if resp.double_clicked()
+        && selecting
         && let Some(c) = &hit
     {
         let _ = app.run("edit.select", json!({"clips": [c.id.0]}));
         if eff == Tool::Grabber && matches!(c.content, ClipContent::Midi { .. }) {
             app.ui.show_midi_editor = true;
         }
+    } else if resp.double_clicked()
+        && selecting
+        && eff != Tool::Grabber
+        && hit.is_none()
+        && let Some(gap) = gap_at(s, track.id, at)
+    {
+        // Double-click in empty space: the gap between the clips around it.
+        let _ = app.run("edit.select", json!({"tracks": [track.id.0], "start": gap.start, "end": gap.end}));
     }
 }
 
@@ -479,6 +489,20 @@ fn place_insertion(app: &mut SoundApp, ui: &Ui, s: &Session, track: TrackId, at:
     if app.engine.revision != rev {
         ui.ctx().request_discard("insertion point moved");
     }
+}
+
+/// The empty stretch of `track` around `at`: from the end of the clip before it (or the session
+/// start) to the start of the clip after it (or the end of the session's material). `None` when
+/// `at` is inside a clip or the stretch is empty.
+pub(super) fn gap_at(s: &Session, track: TrackId, at: Samples) -> Option<Range> {
+    let clips = s.track(track)?.clips();
+    if clips.iter().any(|c| c.start <= at && at < c.end()) {
+        return None;
+    }
+    let from = clips.iter().map(Clip::end).filter(|&e| e <= at).max().unwrap_or(0);
+    let to = clips.iter().map(|c| c.start).filter(|&b| b > at).min().unwrap_or_else(|| s.content_end().max(at));
+    let r = Range::new(from, to);
+    (!r.is_empty()).then_some(r)
 }
 
 /// Whole bars from `from` to `to` (at least one), inside the gap between clips where `from` is.
