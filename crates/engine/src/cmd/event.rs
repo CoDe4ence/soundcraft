@@ -89,7 +89,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "New Memory Location",
             [],
             Some("Enter"),
-            "{name?, at?, start?, end?, kind?: marker|selection|none, ruler?: 1..5, track?: id|name (a track-lane marker), store?: [zoom|pre_post_roll|track_visibility|track_heights|group_enables|window_config], window_config?: n} — `store` captures those view settings now, for recall",
+            "{name?, at?, start?, end?, kind?: marker|selection|none, ruler?: 1..5, track?: id|name (a track-lane marker), comments?, color?: [r,g,b], store?: [zoom|pre_post_roll|track_visibility|track_heights|group_enables|window_config], window_config?: n} — `store` captures those view settings now, for recall",
             always,
             add_marker
         ),
@@ -363,11 +363,15 @@ fn add_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").map_or_else(|| format!("Marker {n}"), str::to_string);
     let mut view = soundcraft_model::LocationView::default();
     super::marker_view::update("markers.add", s, p, &mut view)?;
+    let color = color_param("markers.add", p)?.flatten();
+    let comments = str_param(p, "comments").unwrap_or_default().to_string();
     let id = s.add_marker(&name, kind, a.max(0), b.max(a).max(0));
     if let Some(m) = s.markers.iter_mut().find(|m| m.id == id) {
         m.ruler = i64_or(p, "ruler", 1).clamp(1, 5) as u8;
         m.view = view;
         m.track = track;
+        m.color = color;
+        m.comments = comments;
     }
     let number = s.marker(id).map_or(0, |m| m.number);
     Ok(json!({"id": id, "number": number}))
@@ -387,6 +391,22 @@ fn marker_index(e: &Engine, p: &Value, cmd: &str) -> Result<usize> {
     idx.ok_or_else(|| bad(cmd, "unknown memory location (give `number`, `id` or `name`)"))
 }
 
+/// `p.color`: absent (`None`), `null` (back to the default colour) or `[r, g, b]`.
+fn color_param(cmd: &str, p: &Value) -> Result<Option<Option<[u8; 3]>>> {
+    match p.get("color") {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(Value::Array(a)) if a.len() == 3 => {
+            let ch = |i: usize| a.get(i).and_then(Value::as_u64).and_then(|v| u8::try_from(v).ok());
+            match (ch(0), ch(1), ch(2)) {
+                (Some(r), Some(g), Some(b)) => Ok(Some(Some([r, g, b]))),
+                _ => Err(bad(cmd, "`color` components must be integers 0..=255")),
+            }
+        }
+        Some(_) => Err(bad(cmd, "`color` must be [r,g,b] or null")),
+    }
+}
+
 fn delete_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     let i = marker_index(e, p, "markers.delete")?;
     e.session_mut().markers.remove(i);
@@ -396,18 +416,7 @@ fn delete_marker(e: &mut Engine, p: &Value) -> Result<Value> {
 fn edit_marker(e: &mut Engine, p: &Value) -> Result<Value> {
     let i = marker_index(e, p, "markers.edit")?;
     let at = position_param(e, "markers.edit", p, "at")?;
-    let color = match p.get("color") {
-        None => None,
-        Some(Value::Null) => Some(None),
-        Some(Value::Array(a)) if a.len() == 3 => {
-            let ch = |i: usize| a.get(i).and_then(Value::as_u64).and_then(|v| u8::try_from(v).ok());
-            match (ch(0), ch(1), ch(2)) {
-                (Some(r), Some(g), Some(b)) => Some(Some([r, g, b])),
-                _ => return Err(bad("markers.edit", "`color` components must be integers 0..=255")),
-            }
-        }
-        Some(_) => return Err(bad("markers.edit", "`color` must be [r,g,b] or null")),
-    };
+    let color = color_param("markers.edit", p)?;
     // `track`: a track id or name puts it on that track's lane, null back on the ruler.
     let track = match p.get("track") {
         None => None,

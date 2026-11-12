@@ -80,7 +80,9 @@ pub(super) fn strip(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
         ));
         painter.text(pos2(x + 6.0, row.center().y), egui::Align2::LEFT_CENTER, &m.name, bold(10.0), t.marker_text);
     }
-    let resp = ui.interact(row, ui.scope_id().with(("lane_markers", track.id.0)), Sense::click());
+    let resp = ui.interact(row, ui.scope_id().with(("lane_markers", track.id.0)), Sense::click_and_drag());
+    let ids: Vec<(f32, u64)> = marks.iter().map(|m| (x_of(&s, tl, m.start), m.id.0)).collect();
+    drag(app, ui, &resp, tl, row, |x| ids.iter().find(|(mx, _)| (mx - x).abs() < 6.0).map(|(_, id)| *id));
     let Some(p) = resp.interact_pointer_pos() else { return };
     let hit = marks.iter().find(|m| (x_of(&s, tl, m.start) - p.x).abs() < 6.0).map(|m| (m.id, m.number, m.name.clone()));
     if resp.double_clicked() {
@@ -101,6 +103,34 @@ pub(super) fn strip(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
         } else {
             crate::panels::memory::recall(app, number);
         }
+    }
+}
+
+/// Dragging a marker along its ruler or lane: `pick` names the marker under the press (by its x),
+/// a line follows the pointer (snapped to the grid in Grid mode), and on release the marker moves
+/// there in one undoable `markers.edit`.
+pub(super) fn drag(app: &mut SoundApp, ui: &Ui, resp: &egui::Response, tl: Rect, row: Rect, pick: impl Fn(f32) -> Option<u64>) {
+    let key = resp.id.with("dragging_marker");
+    if resp.drag_started()
+        && let Some(id) = ui.input(|i| i.pointer.press_origin()).and_then(|o| pick(o.x))
+    {
+        ui.data_mut(|d| d.insert_temp(key, id));
+    }
+    let Some(id) = ui.data(|d| d.get_temp::<u64>(key)) else { return };
+    let Some(p) = resp.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.latest_pos())) else { return };
+    let s = app.engine.session_arc();
+    let at = super::input::snap(&s, sample_at(&s, tl, p.x).max(0));
+    if resp.drag_stopped() {
+        ui.data_mut(|d| d.remove::<u64>(key));
+        if let Err(error) = app.run("markers.edit", json!({"id": id, "at": at})) {
+            app.ui.status = error;
+        }
+    } else {
+        let x = x_of(&s, tl, at);
+        ui.painter()
+            .with_clip_rect(tl.union(row))
+            .line_segment([pos2(x, row.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, Tokens::current().insertion));
+        ui.ctx().request_repaint();
     }
 }
 

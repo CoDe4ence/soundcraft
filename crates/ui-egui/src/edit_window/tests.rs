@@ -1593,6 +1593,33 @@ fn alt_click_on_a_marker_deletes_it() {
 }
 
 #[test]
+fn dragging_a_marker_on_the_ruler_moves_it_in_one_undoable_step() {
+    let mut engine = soundcraft_engine::demo::demo_engine();
+    engine.session_mut().edit.rulers = vec!["markers".into()];
+    engine.session_mut().edit.edit_mode = soundcraft_model::EditMode::Slip;
+    engine.execute("markers.add", &json!({"at": 48_000, "name": "Drag me"})).unwrap();
+    let mut h = harness_with(engine);
+    let s = h.state().engine.session_arc();
+    let marker = s.markers.iter().find(|m| m.name == "Drag me").unwrap().clone();
+    let y = timeline(&h).min.y - 11.5;
+    let from = pos2(x_of(&s, timeline(&h), marker.start), y);
+    let to = from + vec2(120.0, 0.0);
+    let want = sample_at(&s, timeline(&h), to.x);
+
+    drag(&mut h, from, to);
+
+    let moved = h.state().engine.session().markers.iter().find(|m| m.id == marker.id).unwrap().start;
+    assert!((moved - want).abs() <= s.edit.zoom.samples_per_px.ceil() as i64, "moved to {moved}, wanted about {want}");
+    h.state_mut().engine.undo();
+    assert_eq!(h.state().engine.session().markers.iter().find(|m| m.id == marker.id).unwrap().start, 48_000);
+
+    // A click without moving still recalls it.
+    h.step();
+    click(&mut h, from);
+    assert_eq!(h.state().engine.session().edit.selection.start, 48_000);
+}
+
+#[test]
 fn short_track_name_is_centered_and_long_name_is_left_aligned() {
     let mut h = harness(2);
     let s = h.state().engine.session_arc();

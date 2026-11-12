@@ -21,6 +21,7 @@ mod file;
 mod health;
 mod instrument;
 mod marker_view;
+mod markers_more;
 mod midi;
 mod mix;
 mod more_util;
@@ -138,6 +139,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(track::specs());
         v.extend(clip::specs());
         v.extend(event::specs());
+        v.extend(markers_more::specs());
         v.extend(mix::specs());
         v.extend(options::specs());
         v.extend(transport::specs());

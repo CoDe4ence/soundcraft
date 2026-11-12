@@ -222,8 +222,11 @@ pub(super) fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect,
                     ));
                     painter.text(pos2(x + 8.0, row.center().y), Align2::LEFT_CENTER, &m.name, bold(11.0), t.marker_text);
                 }
-                // Click on the marker ruler: recall a marker; double-click renames it, or adds one.
-                let resp = ui.interact(row, ui.scope_id().with(("marker_ruler", lane)), Sense::click());
+                // Click on the marker ruler: recall a marker; double-click renames it, or adds one;
+                // drag one to move it.
+                let resp = ui.interact(row, ui.scope_id().with(("marker_ruler", lane)), Sense::click_and_drag());
+                let ids: Vec<(f32, u64)> = s.markers.iter().filter(on_lane).map(|m| (x_of(&s, tl, m.start), m.id.0)).collect();
+                super::lane_markers::drag(app, ui, &resp, tl, row, |x| ids.iter().find(|(mx, _)| (mx - x).abs() < 8.0).map(|(_, id)| *id));
                 if let Some(p) = resp.interact_pointer_pos() {
                     let hit = s
                         .markers
