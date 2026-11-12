@@ -974,6 +974,19 @@ mod tests {
         assert_eq!(e.execute("edit.paste_merge_markers", &json!({"at": at})).unwrap()["added"], 0);
     }
 
+    #[test]
+    fn merge_markers_carries_stored_selections_with_their_length() {
+        let mut e = Engine::default();
+        e.execute("track.new", &json!({"count": 1})).unwrap();
+        e.execute("markers.add", &json!({"name": "Take", "kind": "selection", "start": 1_000, "end": 4_000})).unwrap();
+        e.execute("markers.add", &json!({"name": "View", "kind": "none", "at": 2_000})).unwrap();
+        e.execute("edit.select", &json!({"start": 0, "end": 10_000})).unwrap();
+        e.execute("edit.copy", &json!({})).unwrap();
+        assert_eq!(e.execute("edit.paste_merge_markers", &json!({"at": 100_000})).unwrap()["added"], 1, "a view-only location is not copied");
+        let pasted = e.session().markers.iter().find(|m| m.start == 101_000).cloned().expect("pasted selection");
+        assert_eq!((pasted.name.as_str(), pasted.kind, pasted.end), ("Take", soundcraft_model::MarkerKind::Selection, 104_000));
+    }
+
     fn session_with_clips(starts: &[(Samples, Samples)]) -> (Engine, soundcraft_model::TrackId, Vec<ClipId>) {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);

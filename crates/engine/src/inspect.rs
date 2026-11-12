@@ -2,7 +2,7 @@
 
 use crate::Engine;
 use serde_json::{Value, json};
-use soundcraft_model::{Clip, ClipContent, ClipId, Track, TrackId};
+use soundcraft_model::{Clip, ClipContent, ClipId, MarkerKind, Track, TrackId};
 use soundcraft_time::TimeFormat;
 
 fn clip_json(e: &Engine, c: &Clip) -> Value {
@@ -144,9 +144,16 @@ pub fn session_text(e: &Engine) -> String {
         }
         out.push('\n');
     }
-    out.push_str("M A R K E R S  L I S T I N G\n#\tLOCATION\tNAME\n");
+    out.push_str("M A R K E R S  L I S T I N G\n#\tLOCATION\tTYPE\tLENGTH\tNAME\tCOMMENTS\n");
+    // Tabs and line breaks in names and comments would break the columns.
+    let cell = |t: &str| t.replace(['\t', '\r', '\n'], " ");
     for m in &s.markers {
-        out.push_str(&format!("{}\t{}\t{}\n", m.number, fmt(m.start), m.name));
+        let (kind, length) = match m.kind {
+            MarkerKind::Marker => ("Marker", String::new()),
+            MarkerKind::Selection => ("Selection", fmt(m.end - m.start)),
+            MarkerKind::None => ("None", String::new()),
+        };
+        out.push_str(&format!("{}\t{}\t{kind}\t{length}\t{}\t{}\n", m.number, fmt(m.start), cell(&m.name), cell(&m.comments)));
     }
     out
 }
@@ -155,6 +162,18 @@ pub fn session_text(e: &Engine) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn session_text_lists_each_locations_type_length_and_comments() {
+        let mut e = Engine::default();
+        e.execute("markers.add", &json!({"name": "Verse", "at": 48_000})).unwrap();
+        e.execute("markers.add", &json!({"name": "Take\t2", "kind": "selection", "start": 96_000, "end": 144_000})).unwrap();
+        e.execute("markers.edit", &json!({"name": "Verse", "comments": "louder\nhere"})).unwrap();
+        let text = session_text(&e);
+        assert!(text.contains("#\tLOCATION\tTYPE\tLENGTH\tNAME\tCOMMENTS\n"), "{text}");
+        assert!(text.contains("\tMarker\t\tVerse\tlouder here\n"), "{text}");
+        assert!(text.contains("\tSelection\t0:01.000\tTake 2\t\n"), "{text}");
+    }
 
     #[test]
     fn session_text_counts_only_audio_track_clips() {

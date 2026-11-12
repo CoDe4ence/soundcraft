@@ -285,7 +285,9 @@ fn cut_copy(e: &mut Engine, p: &Value, cut: bool, id: &str) -> Result<Value> {
         .session()
         .markers
         .iter()
-        .filter(|m| m.kind == soundcraft_model::MarkerKind::Marker && range.contains(m.start))
+        // Markers and stored selections that start in the range; a location that only recalls view
+        // settings has no place on the timeline to copy.
+        .filter(|m| m.kind != soundcraft_model::MarkerKind::None && range.contains(m.start))
         .map(|m| {
             let mut m = m.clone();
             m.end -= m.start;

@@ -330,7 +330,8 @@ fn add_marker(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     };
     let s = e.session_mut();
-    let n = s.markers.len() + 1;
+    // The default name carries the number the location gets, so the two agree after a delete.
+    let n = s.markers.iter().map(|m| m.number).max().unwrap_or(0).saturating_add(1);
     let name = str_param(p, "name").map_or_else(|| format!("Marker {n}"), str::to_string);
     let id = s.add_marker(&name, kind, a.max(0), b.max(a).max(0));
     if let Some(m) = s.markers.iter_mut().find(|m| m.id == id) {
@@ -549,6 +550,18 @@ mod tests {
         let r = e.execute("markers.add", &json!({"name": "M"})).unwrap();
         let m = e.session().markers.iter().find(|m| Some(m.id.0) == r["id"].as_u64()).map(|m| (m.start, m.end));
         assert_eq!(m, Some((4800, 4800)));
+    }
+
+    #[test]
+    fn a_new_markers_default_name_matches_its_number_after_a_delete() {
+        let mut e = crate::Engine::default();
+        for _ in 0..3 {
+            e.execute("markers.add", &json!({})).unwrap();
+        }
+        e.execute("markers.delete", &json!({"number": 1})).unwrap();
+        let r = e.execute("markers.add", &json!({})).unwrap();
+        let m = e.session().markers.iter().find(|m| Some(u64::from(m.number)) == r["number"].as_u64()).cloned().unwrap();
+        assert_eq!((m.number, m.name.as_str()), (4, "Marker 4"));
     }
 
     /// `markers.edit` documents `color`: it sets the memory location's RGB colour, undoably; `null` clears it.
